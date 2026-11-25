@@ -9,5 +9,5 @@ test('membership request constrained to pending farmer',()=>assert.match(sql,/ro
 test('harvest approval locks row and checks manager',()=>{assert.match(sql,/where id=p_id for update/);assert.match(sql,/private\.is_manager\(h\.fpo_id\)/);assert.match(sql,/harvest_id uuid unique/)});
 test('catalogue API aggregates stock without farmer fields',()=>assert.match(sql,/sum\(l\.available_kg\)/));
 test('missing backend does not fake real data',()=>{assert.match(ui,/Backend configuration pending/);assert.match(api,/Backend configuration is pending/)});
-test('integrations remain inactive',()=>assert.match(ui,/WhatsApp and ONDC disabled/));
+test('real integrations remain inactive',()=>assert.match(ui,/WhatsApp and ONDC live connections disabled/));
 test('Google OAuth uses Supabase and current site redirect, never assigns roles',()=>{assert.match(ui,/signInWithOAuth\(\{provider:'google'/);assert.match(ui,/redirectTo:window\.location\.origin\+'\/'/);assert.match(ui,/Continue with Google/);assert.match(ui,/prompt:'select_account'/)});

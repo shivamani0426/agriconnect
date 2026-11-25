@@ -68,6 +68,6 @@ return <><header><div className="brand"><span className="logo">A</span><div><b>A
 {tab==='Earnings'&&(!session?login:loadingPrivate||loadedUser!==uid?<section className="panel"><p>Loading your account…</p><button disabled={busy} onClick={()=>void run(()=>load(uid),'Account refreshed.',false)}>Retry</button></section>:!profile?setup:<OrderWorkspace key={uid+'farmer'} uid={uid!} mode="farmer" managed={[]} fpos={fpos} onChange={()=>load(uid)}/>)}
 
 </>}
-</main><footer>AgriConnect · Standalone demo · Simulated payments only · WhatsApp and ONDC disabled</footer></>}
+</main><footer>AgriConnect · Standalone demo · Simulated payments only · WhatsApp and ONDC live connections disabled · Local channel sandbox available</footer></>}
 function Photo({path}:{path:string}){const [url,setUrl]=useState(''),[error,setError]=useState('');return <div>{url?<img className="crop-photo" src={url} alt="Submitted crop" onError={()=>{setUrl('');setError('Photo link expired or unavailable.')}}/>:<button className="quiet" onClick={()=>{setError('');api.photo(path).then(data=>setUrl(data?.signedUrl??'')).catch(e=>setError(e.message))}}>View crop photo</button>}{error&&<p role="alert">{error}</p>}</div>}
 createRoot(document.getElementById('root')!).render(<App/>);

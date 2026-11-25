@@ -24,9 +24,9 @@ try{
   if(path.endsWith('/fpos'))return send([{id:fpo,name:'Mock FPO',location:'Test'}]);
   if(path.endsWith('/profiles'))return send({display_name:'Mock Customer'});
   if(path.endsWith('/memberships')||path.endsWith('/harvests')||path.endsWith('/inventory_lots')||path.endsWith('/order_allocations'))return send([]);
-  if(path.endsWith('/rpc/checkout_order')){
+  if(path.endsWith('/rpc/checkout_order')||path.endsWith('/rpc/checkout_demo_channel')){
    request=req.postDataJSON();stock-=request.p_items[0].quantity_kg;
-   order={id:oid,customer_id:uid,fpo_id:fpo,items:request.p_items,delivery_address:request.p_address,status:'confirmed',payment_status:'simulated_paid',total_paise:15000,gateway_paise:300,platform_paise:750,logistics_paise:1200,farmer_pool_paise:12750,created_at:new Date().toISOString()};
+   order={id:oid,customer_id:uid,fpo_id:fpo,items:request.p_items,delivery_address:request.p_address,status:'confirmed',payment_status:'simulated_paid',source:request.p_channel?request.p_channel+'_demo':'web',total_paise:15000,gateway_paise:300,platform_paise:750,logistics_paise:1200,farmer_pool_paise:12750,created_at:new Date().toISOString()};
    events=[{id:1,order_id:oid,status:'confirmed',created_at:new Date().toISOString()}];
    return send(oid);
   }
@@ -59,6 +59,20 @@ try{
  await page.getByText('Demo refund recorded',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Market',exact:true}).click();
  await page.getByText('100 kg available',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Add to cart',exact:true}).click();
+ await page.getByRole('button',{name:'Cart (1)',exact:true}).click();
+ await page.getByText('External channel sandbox (optional)').click();
+ await page.getByLabel('Order channel').selectOption('whatsapp');
+ await page.getByLabel('Quantity (kg)').fill('5');
+ await page.getByLabel('Demo delivery address').fill('Test street, Bengaluru');
+ await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Place demo order'}).click();
+ await page.getByText('WhatsApp demo',{exact:false}).waitFor();assert.equal(request.p_channel,'whatsapp');
+ await page.getByRole('button',{name:'Switch workspace'}).click();
+ await page.getByRole('button',{name:'Open farmer dashboard'}).click();
+ await page.getByRole('heading',{name:'My farm'}).waitFor();assert.equal(await page.getByRole('button',{name:'Market',exact:true}).count(),0);
+ await page.getByRole('button',{name:'Join FPO',exact:true}).click();await page.getByRole('heading',{name:'My memberships'}).waitFor();
+ await page.getByRole('button',{name:'Switch workspace'}).click();await page.getByRole('button',{name:'Open FPO dashboard'}).click();await page.getByRole('heading',{name:'Manage your organisation'}).waitFor();assert.equal(await page.getByRole('button',{name:'Cart',exact:true}).count(),0);
+ await page.getByRole('button',{name:'Delivery',exact:true}).click();await page.getByText('You must manage an FPO to coordinate deliveries.').waitFor();
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile layout overflow');
  console.log('PASS: mocked customer cart, demo acknowledgement, checkout payload, order tracking, cancellation, restored stock, mobile layout');
 }finally{await browser?.close();server.kill();}
