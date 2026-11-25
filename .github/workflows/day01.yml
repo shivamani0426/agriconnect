@@ -14,3 +14,7 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/browser-smoke.mjs
+        env:
+          AGRICONNECT_TEST_URL: https://agriconnect-q7c2.onrender.com
