@@ -18,3 +18,4 @@ jobs:
       - run: node tests/browser-smoke.mjs
         env:
           AGRICONNECT_TEST_URL: https://agriconnect-q7c2.onrender.com
+      - run: node tests/google-oauth-browser.mjs

@@ -10,3 +10,4 @@ test('harvest approval locks row and checks manager',()=>{assert.match(sql,/wher
 test('catalogue API aggregates stock without farmer fields',()=>assert.match(sql,/sum\(l\.available_kg\)/));
 test('missing backend does not fake real data',()=>{assert.match(ui,/Backend configuration pending/);assert.match(api,/Backend configuration is pending/)});
 test('integrations remain inactive',()=>assert.match(ui,/WhatsApp and ONDC disabled/));
+test('Google OAuth uses Supabase and current site redirect, never assigns roles',()=>{assert.match(ui,/signInWithOAuth\(\{provider:'google'/);assert.match(ui,/redirectTo:window\.location\.origin\+'\/'/);assert.match(ui,/Continue with Google/);assert.match(ui,/prompt:'select_account'/)});
