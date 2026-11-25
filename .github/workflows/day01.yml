@@ -1,7 +1,7 @@
 name: Day 01 verification
 on:
   push:
-    branches: [feat/day-01-foundation, main]
+    branches: [feat/day-01-foundation, feat/day-02-commerce, main]
   pull_request:
 jobs:
   build:
