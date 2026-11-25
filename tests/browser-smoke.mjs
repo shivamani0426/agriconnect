@@ -6,10 +6,11 @@ try {
  const url=process.env.AGRICONNECT_TEST_URL;
  if(!url)throw Error('Missing AGRICONNECT_TEST_URL');
  await page.goto(url,{waitUntil:'domcontentloaded'});
+ const chooser=page.getByRole('button',{name:'Open customer dashboard'});if(await chooser.isVisible())await chooser.click();
  await page.getByRole('heading',{name:'Available produce'}).waitFor();
  assert.equal(await page.getByText('Backend configuration pending.',{exact:false}).count(),0);
  assert.equal(await page.getByRole('alert').count(),0);
- await page.getByRole('button',{name:'Farmer',exact:true}).click();
+ const modern=await page.getByRole('button',{name:'Switch workspace'}).isVisible();if(modern){await page.getByRole('button',{name:'Switch workspace'}).click();await page.getByRole('button',{name:'Open farmer dashboard'}).click();}else await page.getByRole('button',{name:'Farmer',exact:true}).click();
  await page.getByRole('heading',{name:'Welcome back'}).waitFor();
  await page.getByRole('button',{name:'New here? Create account'}).click();
  await page.getByRole('heading',{name:'Create your account'}).waitFor();
@@ -19,12 +20,11 @@ try {
  await page.locator('main form').getByRole('button',{name:'Sign in',exact:true}).click();
  await page.getByRole('alert').waitFor({timeout:20000});
  assert.match(await page.getByRole('alert').innerText(),/invalid login credentials|invalid credentials|invalid email or password/i);
- await page.getByRole('button',{name:'FPO manager',exact:true}).click();
+ if(modern){await page.getByRole('button',{name:'Switch workspace'}).click();await page.getByRole('button',{name:'Open FPO dashboard'}).click();}else await page.getByRole('button',{name:'FPO manager',exact:true}).click();
  await page.getByRole('heading',{name:'Welcome back'}).waitFor();
  await page.getByRole('button',{name:'Delivery',exact:true}).click();
  await page.getByText('Not enabled in Day 01.',{exact:false}).or(page.getByRole('heading',{name:'Welcome back'})).waitFor();
- await page.getByRole('button',{name:'Admin',exact:true}).click();
- await page.getByText('Not enabled in Day 01.',{exact:false}).waitFor();
+ if(!modern){await page.getByRole('button',{name:'Admin',exact:true}).click();await page.getByText('Not enabled in Day 01.',{exact:false}).waitFor();}else{assert.equal(await page.getByRole('button',{name:'Market',exact:true}).count(),0);await page.getByRole('button',{name:'Switch workspace'}).click();await page.getByRole('button',{name:'Open customer dashboard'}).click();}
  await page.setViewportSize({width:390,height:844});
  await page.getByRole('button',{name:'Market',exact:true}).click();
  await page.getByRole('heading',{name:'Available produce'}).waitFor();

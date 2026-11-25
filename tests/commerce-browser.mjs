@@ -38,6 +38,8 @@ try{
   return send([]);
  });
  await page.goto(origin);
+ await page.getByRole('button',{name:'Open customer dashboard'}).click();
+ assert.equal(await page.getByRole('button',{name:'Submit harvest',exact:true}).count(),0);
  await page.getByRole('button',{name:'Add to cart',exact:true}).click();
  await page.getByRole('button',{name:'Cart (1)',exact:true}).click();
  await page.getByRole('heading',{name:'Shopping cart'}).waitFor();
