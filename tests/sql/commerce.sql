@@ -6,7 +6,7 @@ insert into auth.users(id,email) values
 ('a5000000-0000-4000-8000-000000000003','farmer-b@example.invalid'),
 ('a5000000-0000-4000-8000-000000000004','buyer@example.invalid'),
 ('a5000000-0000-4000-8000-000000000005','outsider@example.invalid');
-insert into public.profiles select id,'Day02 QA' from auth.users;
+insert into public.profiles(id,display_name,account_role) select id,'Day02 QA',case when email like 'manager%' then 'manager' when email like 'farmer%' then 'farmer' else 'customer' end from auth.users;
 set local role authenticated;
 select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000001',true);
 select set_config('test.fpo',public.create_fpo('Day02 QA FPO','Test')::text,true);
@@ -63,4 +63,27 @@ do $$ begin if (select sum(available_kg) from public.inventory_lots where fpo_id
 reset role;
 do $$ begin if (select count(*) from private.integration_events where event_type='demo_checkout')<>2 then raise exception 'FAIL channel event deduplication';end if;end $$;
 select 'PASS: both demo channels share stock, retain attribution and deduplicate retries' result;
+-- Exclusive role authorization checks, using the existing commerce fixtures.
+set local role authenticated;
+select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000002',true);
+do $role$ begin
+begin update public.profiles set account_role='manager' where id=auth.uid();raise exception 'FAIL role mutation';exception when raise_exception then if sqlerrm<>'Account role is permanent' then raise;end if;end;
+begin perform public.create_fpo('Unauthorized FPO','Test');raise exception 'FAIL farmer creates FPO';exception when raise_exception then if sqlerrm<>'FPO manager account required' then raise;end if;end;
+begin perform public.checkout_order(current_setting('test.fpo')::uuid,'[]','Test address',gen_random_uuid());raise exception 'FAIL farmer checkout';exception when raise_exception then if sqlerrm<>'Customer account required' then raise;end if;end;
+begin perform public.checkout_demo_channel('whatsapp',current_setting('test.fpo')::uuid,'[]','Test address',gen_random_uuid());raise exception 'FAIL farmer demo checkout';exception when raise_exception then if sqlerrm<>'Customer account required' then raise;end if;end;
+end $role$;
+select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000001',true);
+do $role$ begin
+begin update public.profiles set account_role='customer' where id=auth.uid();raise exception 'FAIL manager role mutation';exception when raise_exception then if sqlerrm<>'Account role is permanent' then raise;end if;end;
+begin perform public.checkout_order(current_setting('test.fpo')::uuid,'[]','Test address',gen_random_uuid());raise exception 'FAIL manager checkout';exception when raise_exception then if sqlerrm<>'Customer account required' then raise;end if;end;
+begin insert into public.memberships(fpo_id,user_id,role,status) values(current_setting('test.fpo')::uuid,auth.uid(),'farmer','pending');raise exception 'FAIL manager farmer membership';exception when raise_exception then if sqlerrm<>'Membership must match permanent account role' then raise;end if;end;
+end $role$;
+select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000004',true);
+do $role$ begin
+begin perform public.create_fpo('Unauthorized FPO','Test');raise exception 'FAIL customer creates FPO';exception when raise_exception then if sqlerrm<>'FPO manager account required' then raise;end if;end;
+begin insert into public.memberships(fpo_id,user_id,role,status) values(current_setting('test.fpo')::uuid,auth.uid(),'farmer','pending');raise exception 'FAIL customer farmer membership';exception when raise_exception then if sqlerrm<>'Membership must match permanent account role' then raise;end if;end;
+begin update public.profiles set account_role='farmer' where id=auth.uid();raise exception 'FAIL customer role mutation';exception when raise_exception then if sqlerrm<>'Account role is permanent' then raise;end if;end;
+end $role$;
+reset role;
+select 'PASS: permanent roles, cross-role writes and web/demo checkout denied' result;
 rollback;

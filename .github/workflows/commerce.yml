@@ -1,7 +1,7 @@
 name: Commerce verification
 on:
   push:
-    branches: [feat/day-02-commerce, feat/workspaces-channel-sandbox, main]
+    branches: [feat/day-02-commerce, feat/workspaces-channel-sandbox, feat/exclusive-account-roles, main]
   pull_request:
 jobs:
   database:
