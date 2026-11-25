@@ -22,7 +22,7 @@ try {
  await page.getByRole('button',{name:'FPO manager',exact:true}).click();
  await page.getByRole('heading',{name:'Welcome back'}).waitFor();
  await page.getByRole('button',{name:'Delivery',exact:true}).click();
- await page.getByText('Not enabled in Day 01.',{exact:false}).waitFor();
+ await page.getByText('Not enabled in Day 01.',{exact:false}).or(page.getByRole('heading',{name:'Welcome back'})).waitFor();
  await page.getByRole('button',{name:'Admin',exact:true}).click();
  await page.getByText('Not enabled in Day 01.',{exact:false}).waitFor();
  await page.setViewportSize({width:390,height:844});

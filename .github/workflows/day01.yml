@@ -1,7 +1,7 @@
 name: Day 01 verification
 on:
   push:
-    branches: [feat/day-01-foundation, main]
+    branches: [feat/day-01-foundation, feat/day-02-commerce, main]
   pull_request:
 jobs:
   build:
@@ -19,3 +19,5 @@ jobs:
         env:
           AGRICONNECT_TEST_URL: https://agriconnect-q7c2.onrender.com
       - run: node tests/google-oauth-browser.mjs
+
+      - run: node tests/commerce-browser.mjs
