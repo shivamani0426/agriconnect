@@ -53,14 +53,14 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000004',true);
 select set_config('test.wa',public.checkout_demo_channel('whatsapp',current_setting('test.fpo')::uuid,'[{"crop":"QA tomatoes","grade":"A","price_paise_per_kg":1000,"quantity_kg":10}]','Test address','c5000000-0000-4000-8000-000000000004')::text,true);
 select set_config('test.ondc',public.checkout_demo_channel('ondc',current_setting('test.fpo')::uuid,'[{"crop":"QA tomatoes","grade":"A","price_paise_per_kg":1000,"quantity_kg":5}]','Test address','c5000000-0000-4000-8000-000000000005')::text,true);
-do $ begin
+do $$ begin
 if public.checkout_demo_channel('whatsapp',current_setting('test.fpo')::uuid,'[{"crop":"QA tomatoes","grade":"A","price_paise_per_kg":1000,"quantity_kg":10}]','Test address','c5000000-0000-4000-8000-000000000004')<>current_setting('test.wa')::uuid then raise exception 'FAIL channel retry';end if;
 if not exists(select 1 from public.orders where id=current_setting('test.wa')::uuid and source='whatsapp_demo') or not exists(select 1 from public.orders where id=current_setting('test.ondc')::uuid and source='ondc_demo') then raise exception 'FAIL channel attribution';end if;
 begin perform public.checkout_demo_channel('ondc',current_setting('test.fpo')::uuid,'[{"crop":"QA tomatoes","grade":"A","price_paise_per_kg":1000,"quantity_kg":10}]','Test address','c5000000-0000-4000-8000-000000000004');raise exception 'FAIL cross channel key';exception when raise_exception then if sqlerrm<>'Request key already used for another channel' then raise;end if;end;
-end $;
+end $$;
 select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000001',true);
-do $ begin if (select sum(available_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>10 or (select sum(reserved_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>15 then raise exception 'FAIL shared inventory';end if;end $;
+do $$ begin if (select sum(available_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>10 or (select sum(reserved_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>15 then raise exception 'FAIL shared inventory';end if;end $$;
 reset role;
-do $ begin if (select count(*) from private.integration_events where event_type='demo_checkout')<>2 then raise exception 'FAIL channel event deduplication';end if;end $;
+do $$ begin if (select count(*) from private.integration_events where event_type='demo_checkout')<>2 then raise exception 'FAIL channel event deduplication';end if;end $$;
 select 'PASS: both demo channels share stock, retain attribution and deduplicate retries' result;
 rollback;

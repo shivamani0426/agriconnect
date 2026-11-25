@@ -6,7 +6,7 @@ try {
  const url=process.env.AGRICONNECT_TEST_URL;
  if(!url)throw Error('Missing AGRICONNECT_TEST_URL');
  await page.goto(url,{waitUntil:'domcontentloaded'});
- const chooser=page.getByRole('button',{name:'Open customer dashboard'});if(await chooser.isVisible())await chooser.click();
+ const chooser=page.getByRole('button',{name:'Open customer dashboard'});await chooser.or(page.getByRole('heading',{name:'Available produce'})).waitFor();if(await chooser.isVisible())await chooser.click();
  await page.getByRole('heading',{name:'Available produce'}).waitFor();
  assert.equal(await page.getByText('Backend configuration pending.',{exact:false}).count(),0);
  assert.equal(await page.getByRole('alert').count(),0);
