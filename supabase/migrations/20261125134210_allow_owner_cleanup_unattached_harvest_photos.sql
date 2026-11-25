@@ -1,0 +1,1 @@
+create policy photo_delete_unattached on storage.objects for delete to authenticated using(bucket_id='harvest-photos' and (storage.foldername(name))[1]=(select auth.uid())::text and not private.can_read_photo(name));
