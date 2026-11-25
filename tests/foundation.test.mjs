@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-const sql=readFileSync('supabase/migrations/20261125000000_day01_foundation.sql','utf8');
+const sql=readFileSync('supabase/migrations/20261125105807_day01_foundation.sql','utf8');
 const ui=readFileSync('src/main.tsx','utf8');
 const api=readFileSync('src/api.ts','utf8');
 test('RLS declarations for exposed tables',()=>{for(const table of ['profiles','fpos','memberships','harvests','inventory_lots'])assert.ok(sql.includes('alter table public.'+table+' enable row level security'))});
