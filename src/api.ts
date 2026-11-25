@@ -7,7 +7,7 @@ export function client(){if(!db)throw new Error('Backend configuration is pendin
 export async function result<T>(p:PromiseLike<{data:T;error:{message:string}|null}>):Promise<T>{const {data,error}=await p;if(error)throw new Error(error.message);return data;}
 export const api={
  profile:(uid:string)=>result(client().from('profiles').select('*').eq('id',uid).maybeSingle()),
- saveProfile:(uid:string,name:string)=>result(client().from('profiles').upsert({id:uid,display_name:name})),
+ saveProfile:(uid:string,name:string)=>result(client().from('profiles').update({display_name:name}).eq('id',uid)),
  fpos:()=>result(client().from('fpos').select('*').order('name')),
  memberships:()=>result(client().from('memberships').select('*,profiles(display_name),fpos(name)')),
  harvests:()=>result(client().from('harvests').select('*').order('created_at',{ascending:false})),
