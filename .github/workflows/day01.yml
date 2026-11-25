@@ -19,3 +19,5 @@ jobs:
         env:
           AGRICONNECT_TEST_URL: https://agriconnect-q7c2.onrender.com
       - run: node tests/google-oauth-browser.mjs
+
+      - run: node tests/commerce-browser.mjs
