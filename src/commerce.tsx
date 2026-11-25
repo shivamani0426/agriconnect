@@ -7,7 +7,7 @@ type Order={id:string;customer_id:string;fpo_id:string;items:OrderItem[];deliver
 type Allocation={id:string;order_id:string;fpo_id:string;farmer_id:string;crop:string;grade:string;quantity_kg:number;gross_paise:number;payout_paise:number;status:string};
 type Event={id:number;order_id:string;status:string;created_at:string};
 const money=(p:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR'}).format(p/100);
-const status=(s:string)=>({confirmed:'Confirmed',packed:'Packed',out_for_delivery:'Out for delivery',delivered:'Delivered',cancelled:'Cancelled',reserved:'Reserved',simulated_paid:'Demo payment recorded',simulated_refunded:'Demo refund recorded'}[s]??s);
+const status=(s:string)=>(({confirmed:'Confirmed',packed:'Packed',out_for_delivery:'Out for delivery',delivered:'Delivered',cancelled:'Cancelled',reserved:'Reserved',simulated_paid:'Demo payment recorded',simulated_refunded:'Demo refund recorded'} as Record<string,string>)[s]??s);
 export const productKey=(p:Product)=>JSON.stringify([p.fpo_id,p.crop,p.grade,p.price_paise_per_kg]);
 const subtotal=(q:number,p:number)=>Math.round(Math.round(q*1000)*p/1000);
 const err=(e:unknown)=>e instanceof Error?e.message:String(e);

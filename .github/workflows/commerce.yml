@@ -1,0 +1,33 @@
+name: Commerce verification
+on:
+  push:
+    branches: [feat/day-02-commerce, main]
+  pull_request:
+jobs:
+  database:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: local-ci-test-only
+          POSTGRES_DB: agricitest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d agricitest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: local-ci-test-only
+      PGDATABASE: agricitest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run migrations and transactional acceptance in disposable PostgreSQL
+        run: |
+          psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap.sql
+          for f in supabase/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
+          psql -v ON_ERROR_STOP=1 -f tests/sql/commerce.sql
