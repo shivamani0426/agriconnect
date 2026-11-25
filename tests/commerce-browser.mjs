@@ -8,7 +8,7 @@ const uid='10000000-0000-4000-8000-000000000001',fpo='20000000-0000-4000-8000-00
 const user={id:uid,aud:'authenticated',role:'authenticated',email:'mock@example.invalid',app_metadata:{provider:'email'},user_metadata:{},created_at:new Date().toISOString()};
 const token=[Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url'),Buffer.from(JSON.stringify({sub:uid,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url'),'mock-signature'].join('.');
 const session={access_token:token,refresh_token:'mock-refresh',token_type:'bearer',expires_in:3600,expires_at:Math.floor(Date.now()/1000)+3600,user};
-let stock=100,order=null,request=null,events=[];
+let stock=100,order=null,request=null,events=[],managerEnabled=false;
 const product=()=>({fpo_id:fpo,fpo_name:'Mock FPO',crop:'Tomatoes',grade:'A',price_paise_per_kg:3000,available_kg:stock});
 try{
  for(let i=0;i<60;i++){try{if((await fetch(origin)).ok)break}catch{}await new Promise(r=>setTimeout(r,200))}
@@ -23,21 +23,24 @@ try{
   if(path.endsWith('/rpc/catalogue'))return send([product()]);
   if(path.endsWith('/fpos'))return send([{id:fpo,name:'Mock FPO',location:'Test'}]);
   if(path.endsWith('/profiles'))return send({display_name:'Mock Customer'});
-  if(path.endsWith('/memberships')||path.endsWith('/harvests')||path.endsWith('/inventory_lots')||path.endsWith('/order_allocations'))return send([]);
-  if(path.endsWith('/rpc/checkout_order')){
+  if(path.endsWith('/memberships'))return send(managerEnabled?[{fpo_id:fpo,user_id:uid,role:'manager',status:'active',profiles:{display_name:'Mock manager'},fpos:{name:'Mock FPO'}}]:[]);
+  if(path.endsWith('/harvests')||path.endsWith('/inventory_lots')||path.endsWith('/order_allocations'))return send([]);
+  if(path.endsWith('/rpc/checkout_order')||path.endsWith('/rpc/checkout_demo_channel')){
    request=req.postDataJSON();stock-=request.p_items[0].quantity_kg;
-   order={id:oid,customer_id:uid,fpo_id:fpo,items:request.p_items,delivery_address:request.p_address,status:'confirmed',payment_status:'simulated_paid',total_paise:15000,gateway_paise:300,platform_paise:750,logistics_paise:1200,farmer_pool_paise:12750,created_at:new Date().toISOString()};
+   order={id:oid,customer_id:uid,fpo_id:fpo,items:request.p_items,delivery_address:request.p_address,status:'confirmed',payment_status:'simulated_paid',source:request.p_channel?request.p_channel+'_demo':'web',total_paise:15000,gateway_paise:300,platform_paise:750,logistics_paise:1200,farmer_pool_paise:12750,created_at:new Date().toISOString()};
    events=[{id:1,order_id:oid,status:'confirmed',created_at:new Date().toISOString()}];
    return send(oid);
   }
   if(path.endsWith('/rpc/transition_order')){
-   const body=req.postDataJSON();assert.equal(body.p_next,'cancelled');assert.equal(body.p_id,oid);stock+=order.items[0].quantity_kg;order={...order,status:'cancelled',payment_status:'simulated_refunded'};events.push({id:2,order_id:oid,status:'cancelled',created_at:new Date().toISOString()});return send(null);
+   const body=req.postDataJSON();assert.equal(body.p_id,oid);if(body.p_next==='cancelled'){stock+=order.items[0].quantity_kg;order={...order,status:'cancelled',payment_status:'simulated_refunded'};}else{assert.ok(managerEnabled);assert.ok(['packed','out_for_delivery','delivered'].includes(body.p_next));order={...order,status:body.p_next};}events.push({id:events.length+1,order_id:oid,status:body.p_next,created_at:new Date().toISOString()});return send(null);
   }
   if(path.endsWith('/orders'))return send(order?[order]:[]);
   if(path.endsWith('/order_events'))return send(events);
   return send([]);
  });
  await page.goto(origin);
+ await page.getByRole('button',{name:'Open customer dashboard'}).click();
+ assert.equal(await page.getByRole('button',{name:'Submit harvest',exact:true}).count(),0);
  await page.getByRole('button',{name:'Add to cart',exact:true}).click();
  await page.getByRole('button',{name:'Cart (1)',exact:true}).click();
  await page.getByRole('heading',{name:'Shopping cart'}).waitFor();
@@ -57,6 +60,22 @@ try{
  await page.getByText('Demo refund recorded',{exact:false}).waitFor();
  await page.getByRole('button',{name:'Market',exact:true}).click();
  await page.getByText('100 kg available',{exact:true}).waitFor();
+ await page.getByRole('button',{name:'Add to cart',exact:true}).click();
+ await page.getByRole('button',{name:'Cart (1)',exact:true}).click();
+ await page.getByText('External channel sandbox (optional)').click();
+ await page.getByLabel('Order channel').selectOption('whatsapp');
+ await page.getByLabel('Quantity (kg)').fill('5');
+ await page.getByLabel('Demo delivery address').fill('Test street, Bengaluru');
+ await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Place demo order'}).click();
+ await page.getByText('WhatsApp demo',{exact:false}).waitFor();assert.equal(request.p_channel,'whatsapp');
+ await page.getByRole('button',{name:'Market',exact:true}).click();await page.getByRole('button',{name:'Add to cart',exact:true}).click();await page.getByRole('button',{name:'Cart (1)',exact:true}).click();await page.getByText('External channel sandbox (optional)').click();await page.getByLabel('Order channel').selectOption('ondc');await page.getByLabel('Quantity (kg)').fill('5');await page.getByLabel('Demo delivery address').fill('Test street, Bengaluru');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Place demo order'}).click();await page.getByText('ONDC demo',{exact:false}).waitFor();assert.equal(request.p_channel,'ondc');
+ await page.getByRole('button',{name:'Switch workspace'}).click();
+ await page.getByRole('button',{name:'Open farmer dashboard'}).click();
+ await page.getByRole('heading',{name:'My farm'}).waitFor();assert.equal(await page.getByRole('button',{name:'Market',exact:true}).count(),0);
+ await page.getByRole('button',{name:'Join FPO',exact:true}).click();await page.getByRole('heading',{name:'My memberships'}).waitFor();
+ await page.getByRole('button',{name:'Switch workspace'}).click();await page.getByRole('button',{name:'Open FPO dashboard'}).click();await page.getByRole('heading',{name:'Manage your organisation'}).waitFor();assert.equal(await page.getByRole('button',{name:'Cart',exact:true}).count(),0);
+ await page.getByRole('button',{name:'Delivery',exact:true}).click();await page.getByText('You must manage an FPO to coordinate deliveries.').waitFor();
+ managerEnabled=true;await page.getByRole('button',{name:'Overview',exact:true}).click();await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByText('Workspace refreshed.',{exact:true}).waitFor();await page.getByRole('button',{name:'Members',exact:true}).click();await page.getByRole('heading',{name:'Members and requests'}).waitFor();await page.getByRole('button',{name:'Harvest review',exact:true}).click();await page.getByRole('heading',{name:'Harvest verification'}).waitFor();await page.getByRole('button',{name:'Inventory',exact:true}).click();await page.getByRole('heading',{name:'Shared inventory'}).waitFor();await page.getByRole('button',{name:'Delivery',exact:true}).click();await page.getByRole('button',{name:'Mark packed'}).click();await page.getByRole('button',{name:'Dispatch',exact:true}).click();await page.getByRole('button',{name:'Mark delivered'}).click();await page.getByRole('button',{name:'Mark delivered'}).waitFor({state:'hidden'});assert.equal(order.status,'delivered');
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile layout overflow');
- console.log('PASS: mocked customer cart, demo acknowledgement, checkout payload, order tracking, cancellation, restored stock, mobile layout');
+ console.log('PASS: mocked website checkout/cancel, both channel checkouts, role navigation, manager delivery lifecycle and mobile layout');
 }finally{await browser?.close();server.kill();}

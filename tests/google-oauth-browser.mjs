@@ -15,7 +15,7 @@ try{
  await route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*'},body:'[]'});
  });
  await page.goto(origin);
- await page.getByRole('button',{name:'FPO manager',exact:true}).click();
+ await page.getByRole('button',{name:'Open FPO dashboard',exact:true}).click();
  await page.getByRole('button',{name:'Continue with Google'}).waitFor();
  await Promise.all([page.waitForURL('https://oauth-test.supabase.co/auth/v1/authorize?**'),page.getByRole('button',{name:'Continue with Google'}).click()]);
  assert.equal(request.searchParams.get('provider'),'google');
