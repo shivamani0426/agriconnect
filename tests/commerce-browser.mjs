@@ -13,33 +13,42 @@ const product=()=>({fpo_id:fpo,fpo_name:'Mock FPO',crop:'Tomatoes',grade:'A',pri
 try{
  for(let i=0;i<60;i++){try{if((await fetch(origin)).ok)break}catch{}await new Promise(r=>setTimeout(r,200))}
  browser=await chromium.launch({headless:true});
+ async function openRole(role,requested,id=uid){
  const page=await browser.newPage({viewport:{width:390,height:844}});
- await page.addInitScript(({session})=>{localStorage.setItem('sb-commerce-test-auth-token',JSON.stringify(session))},{session});
+ const u={...user,id};
+ const access_token=[Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url'),Buffer.from(JSON.stringify({sub:id,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url'),'mock-signature'].join('.');
+ const mockSession={...session,user:u,access_token};
+ let storedRole=role;
+ await page.addInitScript(({mockSession,requested})=>{localStorage.setItem('sb-commerce-test-auth-token',JSON.stringify(mockSession));sessionStorage.setItem('agriconnect.oauth.workspace',requested)},{mockSession,requested});
  await page.route(host+'/**',async route=>{
   const req=route.request(),url=new URL(req.url()),path=url.pathname;
   const send=(body,status=200)=>route.fulfill({status,contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-allow-methods':'GET,POST,OPTIONS'},body:JSON.stringify(body)});
   if(req.method()==='OPTIONS')return send({});
-  if(path==='/auth/v1/user')return send(user);
+  if(path==='/auth/v1/user')return send(u);
   if(path.endsWith('/rpc/catalogue'))return send([product()]);
   if(path.endsWith('/fpos'))return send([{id:fpo,name:'Mock FPO',location:'Test'}]);
-  if(path.endsWith('/profiles'))return send({display_name:'Mock Customer'});
-  if(path.endsWith('/memberships'))return send(managerEnabled?[{fpo_id:fpo,user_id:uid,role:'manager',status:'active',profiles:{display_name:'Mock manager'},fpos:{name:'Mock FPO'}}]:[]);
+  if(path.endsWith('/profiles')){if(req.method()==='POST'){assert.equal(req.postDataJSON().id,id);storedRole=req.postDataJSON().account_role;return send(null,201);}return send(storedRole?{display_name:'Mock '+storedRole,account_role:storedRole}:null);}
+  if(path.endsWith('/memberships'))return send(storedRole==='manager'&&managerEnabled?[{fpo_id:fpo,user_id:id,role:'manager',status:'active',profiles:{display_name:'Mock manager'},fpos:{name:'Mock FPO'}}]:[]);
   if(path.endsWith('/harvests')||path.endsWith('/inventory_lots')||path.endsWith('/order_allocations'))return send([]);
   if(path.endsWith('/rpc/checkout_order')||path.endsWith('/rpc/checkout_demo_channel')){
-   request=req.postDataJSON();stock-=request.p_items[0].quantity_kg;
+   assert.equal(storedRole,'customer');request=req.postDataJSON();stock-=request.p_items[0].quantity_kg;
    order={id:oid,customer_id:uid,fpo_id:fpo,items:request.p_items,delivery_address:request.p_address,status:'confirmed',payment_status:'simulated_paid',source:request.p_channel?request.p_channel+'_demo':'web',total_paise:15000,gateway_paise:300,platform_paise:750,logistics_paise:1200,farmer_pool_paise:12750,created_at:new Date().toISOString()};
    events=[{id:1,order_id:oid,status:'confirmed',created_at:new Date().toISOString()}];
    return send(oid);
   }
   if(path.endsWith('/rpc/transition_order')){
-   const body=req.postDataJSON();assert.equal(body.p_id,oid);if(body.p_next==='cancelled'){stock+=order.items[0].quantity_kg;order={...order,status:'cancelled',payment_status:'simulated_refunded'};}else{assert.ok(managerEnabled);assert.ok(['packed','out_for_delivery','delivered'].includes(body.p_next));order={...order,status:body.p_next};}events.push({id:events.length+1,order_id:oid,status:body.p_next,created_at:new Date().toISOString()});return send(null);
+   const body=req.postDataJSON();assert.equal(body.p_id,oid);if(body.p_next==='cancelled'){stock+=order.items[0].quantity_kg;order={...order,status:'cancelled',payment_status:'simulated_refunded'};}else{assert.equal(storedRole,'manager');assert.ok(managerEnabled);assert.ok(['packed','out_for_delivery','delivered'].includes(body.p_next));order={...order,status:body.p_next};}events.push({id:events.length+1,order_id:oid,status:body.p_next,created_at:new Date().toISOString()});return send(null);
   }
   if(path.endsWith('/orders'))return send(order?[order]:[]);
   if(path.endsWith('/order_events'))return send(events);
   return send([]);
  });
- await page.goto(origin);
- await page.getByRole('button',{name:'Open customer dashboard'}).click();
+ await page.goto(origin);return page;
+ }
+ const page=await openRole('customer','FPO manager');
+ await page.getByRole('heading',{name:'Available produce'}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Switch workspace'}).count(),0);
+ assert.equal(await page.getByRole('button',{name:'Overview',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Submit harvest',exact:true}).count(),0);
  await page.getByRole('button',{name:'Add to cart',exact:true}).click();
  await page.getByRole('button',{name:'Cart (1)',exact:true}).click();
@@ -69,13 +78,17 @@ try{
  await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Place demo order'}).click();
  await page.getByText('WhatsApp demo',{exact:false}).waitFor();assert.equal(request.p_channel,'whatsapp');
  await page.getByRole('button',{name:'Market',exact:true}).click();await page.getByRole('button',{name:'Add to cart',exact:true}).click();await page.getByRole('button',{name:'Cart (1)',exact:true}).click();await page.getByText('External channel sandbox (optional)').click();await page.getByLabel('Order channel').selectOption('ondc');await page.getByLabel('Quantity (kg)').fill('5');await page.getByLabel('Demo delivery address').fill('Test street, Bengaluru');await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Place demo order'}).click();await page.getByText('ONDC demo',{exact:false}).waitFor();assert.equal(request.p_channel,'ondc');
- await page.getByRole('button',{name:'Switch workspace'}).click();
- await page.getByRole('button',{name:'Open farmer dashboard'}).click();
- await page.getByRole('heading',{name:'My farm'}).waitFor();assert.equal(await page.getByRole('button',{name:'Market',exact:true}).count(),0);
- await page.getByRole('button',{name:'Join FPO',exact:true}).click();await page.getByRole('heading',{name:'My memberships'}).waitFor();
- await page.getByRole('button',{name:'Switch workspace'}).click();await page.getByRole('button',{name:'Open FPO dashboard'}).click();await page.getByRole('heading',{name:'Manage your organisation'}).waitFor();assert.equal(await page.getByRole('button',{name:'Cart',exact:true}).count(),0);
- await page.getByRole('button',{name:'Delivery',exact:true}).click();await page.getByText('You must manage an FPO to coordinate deliveries.').waitFor();
- managerEnabled=true;await page.getByRole('button',{name:'Overview',exact:true}).click();await page.getByRole('button',{name:'Refresh',exact:true}).click();await page.getByText('Workspace refreshed.',{exact:true}).waitFor();await page.getByRole('button',{name:'Members',exact:true}).click();await page.getByRole('heading',{name:'Members and requests'}).waitFor();await page.getByRole('button',{name:'Harvest review',exact:true}).click();await page.getByRole('heading',{name:'Harvest verification'}).waitFor();await page.getByRole('button',{name:'Inventory',exact:true}).click();await page.getByRole('heading',{name:'Shared inventory'}).waitFor();await page.getByRole('button',{name:'Delivery',exact:true}).click();await page.getByRole('button',{name:'Mark packed'}).click();await page.getByRole('button',{name:'Dispatch',exact:true}).click();await page.getByRole('button',{name:'Mark delivered'}).click();await page.getByRole('button',{name:'Mark delivered'}).waitFor({state:'hidden'});assert.equal(order.status,'delivered');
+ assert.equal(await page.getByRole('button',{name:'Switch workspace'}).count(),0);
+ const farmer=await openRole('farmer','Market','10000000-0000-4000-8000-000000000002');
+ await farmer.getByRole('heading',{name:'My farm'}).waitFor();assert.equal(await farmer.getByRole('button',{name:'Market',exact:true}).count(),0);assert.equal(await farmer.getByRole('button',{name:'Overview',exact:true}).count(),0);assert.equal(await farmer.getByRole('button',{name:'Switch workspace'}).count(),0);
+ await farmer.getByRole('button',{name:'Join FPO',exact:true}).click();await farmer.getByRole('heading',{name:'My memberships'}).waitFor();
+ const manager=await openRole('manager','Farmer','10000000-0000-4000-8000-000000000003');
+ await manager.getByRole('heading',{name:'Manage your organisation'}).waitFor();assert.equal(await manager.getByRole('button',{name:'Cart',exact:true}).count(),0);assert.equal(await manager.getByRole('button',{name:'Submit harvest',exact:true}).count(),0);assert.equal(await manager.getByRole('button',{name:'Switch workspace'}).count(),0);
+ await manager.getByRole('button',{name:'Delivery',exact:true}).click();await manager.getByText('You must manage an FPO to coordinate deliveries.').waitFor();
+ managerEnabled=true;await manager.getByRole('button',{name:'Overview',exact:true}).click();await manager.getByRole('button',{name:'Refresh',exact:true}).click();await manager.getByText('Workspace refreshed.',{exact:true}).waitFor();await manager.getByRole('button',{name:'Members',exact:true}).click();await manager.getByRole('heading',{name:'Members and requests'}).waitFor();await manager.getByRole('button',{name:'Harvest review',exact:true}).click();await manager.getByRole('heading',{name:'Harvest verification'}).waitFor();await manager.getByRole('button',{name:'Inventory',exact:true}).click();await manager.getByRole('heading',{name:'Shared inventory'}).waitFor();await manager.getByRole('button',{name:'Delivery',exact:true}).click();await manager.getByRole('button',{name:'Mark packed'}).click();await manager.getByRole('button',{name:'Dispatch',exact:true}).click();await manager.getByRole('button',{name:'Mark delivered'}).click();await manager.getByRole('button',{name:'Mark delivered'}).waitFor({state:'hidden'});assert.equal(order.status,'delivered');
+
+ const fresh=await openRole(null,'Farmer','10000000-0000-4000-8000-000000000004');
+ await fresh.getByRole('heading',{name:'Complete your profile'}).waitFor();await fresh.getByLabel('Your name').fill('New farmer');assert.equal(await fresh.getByLabel('Account role').inputValue(),'farmer');await fresh.getByRole('checkbox').check();await fresh.getByRole('button',{name:'Save profile'}).click();await fresh.getByRole('heading',{name:'My farm'}).waitFor();assert.equal(await fresh.getByRole('button',{name:'Switch workspace'}).count(),0);
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile layout overflow');
- console.log('PASS: mocked website checkout/cancel, both channel checkouts, role navigation, manager delivery lifecycle and mobile layout');
+ console.log('PASS: three distinct accounts cannot switch dashboards, wrong login choice redirects to assigned role, new role registration, commerce and delivery regression');
 }finally{await browser?.close();server.kill();}
