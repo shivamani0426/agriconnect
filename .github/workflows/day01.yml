@@ -1,0 +1,21 @@
+name: Day 01 verification
+on:
+  push:
+    branches: [feat/day-01-foundation, main]
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run build
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/browser-smoke.mjs
+        env:
+          AGRICONNECT_TEST_URL: https://agriconnect-q7c2.onrender.com
+      - run: node tests/google-oauth-browser.mjs
