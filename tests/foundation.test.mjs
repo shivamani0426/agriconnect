@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const sql=readFileSync('supabase/migrations/20261125000000_day01_foundation.sql','utf8');
+const ui=readFileSync('src/main.tsx','utf8');
+const api=readFileSync('src/api.ts','utf8');
+test('RLS declarations for exposed tables',()=>{for(const table of ['profiles','fpos','memberships','harvests','inventory_lots'])assert.ok(sql.includes('alter table public.'+table+' enable row level security'))});
+test('membership request constrained to pending farmer',()=>assert.match(sql,/role='farmer' and status='pending'/));
+test('harvest approval locks row and checks manager',()=>{assert.match(sql,/where id=p_id for update/);assert.match(sql,/private\.is_manager\(h\.fpo_id\)/);assert.match(sql,/harvest_id uuid unique/)});
+test('catalogue API aggregates stock without farmer fields',()=>assert.match(sql,/sum\(l\.available_kg\)/));
+test('missing backend does not fake real data',()=>{assert.match(ui,/Backend configuration pending/);assert.match(api,/Backend configuration is pending/)});
+test('integrations remain inactive',()=>assert.match(ui,/WhatsApp and ONDC disabled/));
