@@ -16,6 +16,8 @@ jobs:
         with:
           node-version: '22'
       - run: node --test tests/whatsapp*.test.mjs
+      - name: Verify optional voice service request contract
+        run: python3 -m unittest discover -s services/whatsapp-voice -p 'test_*.py'
   database:
     runs-on: ubuntu-24.04
     services:
