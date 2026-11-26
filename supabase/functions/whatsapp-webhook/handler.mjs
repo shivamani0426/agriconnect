@@ -10,7 +10,7 @@ export async function signature(secret,body){
  return 'sha256='+hex(await crypto.subtle.sign('HMAC',key,body));
 }
 const hash=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
-export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,guide,now=()=>Date.now(),report=()=>{}}){
+export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,guide,prepare,dispatch,statusCallback,now=()=>Date.now(),report=()=>{}}){
  return async req=>{
   try{
    if(req.method==='GET'){
@@ -32,17 +32,23 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
    if(event?.object!=='whatsapp_business_account'||!Array.isArray(event.entry))return response('OK');
    if(env('WA_TEST_REPLIES_ENABLED')!=='true')return response('OK');
    const allowed=new Set((env('WA_TEST_RECIPIENTS')??'').split(',').map(n=>n.trim()).filter(n=>/^\d{7,15}$/.test(n)));
-   if(!allowed.size||!env('WA_ACCESS_TOKEN'))return response('Not configured',503);
+   if(!allowed.size||(!prepare&&!env('WA_ACCESS_TOKEN')))return response('Not configured',503);
    for(const entry of event.entry){
     if(entry?.id!==WABA_ID||!Array.isArray(entry.changes))continue;
     for(const change of entry.changes){
-     const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID||!Array.isArray(v.messages))continue;
-     for(const m of v.messages){
+     const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID )continue;
+     if(statusCallback&&Array.isArray(v.statuses))for(const s of v.statuses){
+      if(typeof s?.id==='string'&&s.id.startsWith('wamid.')&&s.id.length<=512&&allowed.has(s.recipient_id)&&['sent','delivered','read','failed'].includes(s.status)){
+       await statusCallback(s.recipient_id,s.id,s.status);
+      }
+     }
+     for(const m of Array.isArray(v.messages)?v.messages:[]){
       if(typeof m?.id!=='string'||!m.id.startsWith('wamid.')||m.id.length>512||!allowed.has(m.from) )continue;
       const button=m.type==='interactive'&&m.interactive?.type==='button_reply'&&typeof m.interactive?.button_reply?.id==='string';
-      if(!button&&(m.type!=='text'||typeof m.text?.body!=='string'))continue;
-      if(button&&!guide)continue;
-      const original=(button?m.interactive.button_reply.id:m.text.body).trim();
+      const list=!!prepare&&m.type==='interactive'&&m.interactive?.type==='list_reply'&&typeof m.interactive?.list_reply?.id==='string';
+      if(!button&&!list&&(m.type!=='text'||typeof m.text?.body!=='string'))continue;
+      if(button&&!guide&&!prepare)continue;
+      const original=(button?m.interactive.button_reply.id:list?m.interactive.list_reply.id:m.text.body).trim();
       const command=original.toLowerCase();
       if(command.length>512)continue;
       const link=/^link ([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(command);
@@ -50,10 +56,17 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
       const shopping=/^(shop|buy|confirm|track|reset)( |$)/.test(command);
       const farming=/^(fpos|harvest|submit|harvests|harvestreset)( |$)/.test(command);
       const managing=/^(alerts|read)( |$)/.test(command);
-      if(!link&&!greeting&&!shopping&&!farming&&!managing&&!guide)continue;
+      if(!link&&!greeting&&!shopping&&!farming&&!managing&&!guide&&!prepare)continue;
       if(button&&!/^ac_(confirm|cancel):[0-9a-f-]{36}$/.test(command))continue;
+      if(list&&!/^ac_menu:[0-9a-f-]{36}:[1-7]$/.test(command))continue;
       const age=now()-Number(m.timestamp)*1000;if(!Number.isFinite(age)||age>600000||age< -60000)continue;
       const id=await hash(PHONE_ID+':'+m.id);
+      if(prepare){
+       const route=list?'list':button?'button':link?'link':greeting?'guide':shopping?'order':farming?'harvest':managing?'manager':'guide';
+       await prepare({id,phone:m.from,route,command:link&&!button&&!list?link[1]:shopping||managing?command:original});
+       await dispatch(m.from,id);
+       continue;
+      }
       if(!await claim(id))continue;
       let ok=false;try{
        let reply='Welcome to AgriConnect! 🌱 To link your account, sign in at https://agriconnect-q7c2.onrender.com/ and open Profile → WhatsApp account. Send SHOP after linking a Customer account. All orders are tests.';
