@@ -53,7 +53,7 @@ export function createMedia({env,rpc,dbHeaders,dispatch,defer,fetcher=fetch,repo
  const can=phone=>enabled()&&allowedRecipients(env).includes(phone);
  const storage=()=>env('SUPABASE_URL')+'/storage/v1/object/harvest-photos';
  const help=async(phone,id,kind)=>{
-  await rpc('wa_relay_prepare',{p_id:id,p_phone:phone,p_route:'guide',p_command:kind==='audio'?'/voicehelp':'/photohelp'});
+  await rpc('wa_advanced_prepare',{p_id:id,p_phone:phone,p_route:'guide',p_command:kind==='audio'?'/voicehelp':'/photohelp'});
   await dispatch(phone,id);
  };
  async function start({id,phone,kind,media}){
