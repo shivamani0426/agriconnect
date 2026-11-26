@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createHandler,signature,PHONE_ID,WABA_ID} from '../supabase/functions/whatsapp-webhook/handler.mjs';
+const secret='unit-test-secret',verify='a'.repeat(40),sender='919999999999',now=1700000000000;
+const encode=new TextEncoder();
+function fixture(overrides={}){
+ const settings={WA_APP_SECRET:secret,WA_VERIFY_TOKEN:verify,WA_ACCESS_TOKEN:'mock-only',WA_TEST_REPLIES_ENABLED:'true',WA_TEST_RECIPIENTS:sender,...overrides};
+ const receipts=new Map(),sent=[];
+ const handle=createHandler({env:k=>settings[k],claim:async id=>{if(receipts.has(id))return false;receipts.set(id,'claimed');return true;},finish:async(id,status)=>receipts.set(id,status),send:async(to,body)=>{sent.push({to,body});return true;},now:()=>now});
+ return {handle,receipts,sent};
+}
+const url='https://example.invalid/whatsapp-webhook';
+const payload=(opts={})=>({object:'whatsapp_business_account',entry:[{id:opts.waba??WABA_ID,changes:[{field:'messages',value:{metadata:{phone_number_id:opts.phone??PHONE_ID},messages:[{id:'wamid.test1',from:opts.sender??sender,type:'text',timestamp:String(opts.timestamp??now/1000),text:{body:opts.text??'Hi'}}]}}]}]});
+async function post(data,sigSecret=secret){const body=JSON.stringify(data);return new Request(url,{method:'POST',headers:{'x-hub-signature-256':await signature(sigSecret,encode.encode(body))},body});}
+test('verification matches challenge and rejects wrong token',async()=>{const {handle}=fixture();const get=t=>new Request(url+'?hub.mode=subscribe&hub.challenge=123456&hub.verify_token='+t);assert.equal(await (await handle(get(verify))).text(),'123456');assert.equal((await handle(get('wrong'))).status,403);assert.equal((await fixture({WA_VERIFY_TOKEN:''}).handle(get(verify))).status,503);});
+test('reject missing or incorrect signature',async()=>{const {handle,sent}=fixture();assert.equal((await handle(new Request(url,{method:'POST',body:'{}'}))).status,403);assert.equal((await handle(await post(payload(),'wrong'))).status,403);assert.equal(sent.length,0);});
+test('authenticated Hi sends one reply across webhook retries',async()=>{const {handle,sent,receipts}=fixture();assert.equal((await handle(await post(payload()))).status,200);assert.equal((await handle(await post(payload()))).status,200);assert.equal(sent.length,1);assert.equal(sent[0].to,sender);assert.deepEqual([...receipts.values()],['sent']);});
+test('ignore wrong account/number, unauthorized recipients, stale messages and noncommands',async()=>{const {handle,sent}=fixture();for(const opts of [{waba:'1'},{phone:'2'},{sender:'919000000000'},{timestamp:now/1000-601},{text:'place order'}])assert.equal((await handle(await post(payload(opts)))).status,200);assert.equal(sent.length,0);});
+test('kill switch prevents replies and no credentials fail closed',async()=>{const f=fixture({WA_TEST_REPLIES_ENABLED:'false'});assert.equal((await f.handle(await post(payload()))).status,200);assert.equal(f.sent.length,0);assert.equal((await fixture({WA_APP_SECRET:''}).handle(await post(payload()))).status,503);assert.equal((await fixture({WA_ACCESS_TOKEN:''}).handle(await post(payload()))).status,503);});
+test('status callbacks do not trigger replies',async()=>{const {handle,sent}=fixture();const p=payload();delete p.entry[0].changes[0].value.messages;p.entry[0].changes[0].value.statuses=[{id:'wamid.test1',status:'delivered'}];assert.equal((await handle(await post(p))).status,200);assert.equal(sent.length,0);});

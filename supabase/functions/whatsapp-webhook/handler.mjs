@@ -1,0 +1,55 @@
+// Test-only WhatsApp transport. No commerce, account linking, media or private data access.
+export const PHONE_ID='1456298224232496';
+export const WABA_ID='2111995459517329';
+const enc=new TextEncoder();
+const response=(body,status=200)=>new Response(body,{status,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
+const hex=bytes=>Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
+const equal=(a,b)=>{if(typeof a!=='string'||typeof b!=='string'||a.length!==b.length)return false;let n=0;for(let i=0;i<a.length;i++)n|=a.charCodeAt(i)^b.charCodeAt(i);return n===0;};
+export async function signature(secret,body){
+ const key=await crypto.subtle.importKey('raw',enc.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);
+ return 'sha256='+hex(await crypto.subtle.sign('HMAC',key,body));
+}
+const hash=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
+export function createHandler({env,claim,finish,send,now=()=>Date.now(),report=()=>{}}){
+ return async req=>{
+  try{
+   if(req.method==='GET'){
+    const token=env('WA_VERIFY_TOKEN');if(!token||token.length<32)return response('Not configured',503);
+    const p=new URL(req.url).searchParams,challenge=p.get('hub.challenge');
+    if(p.get('hub.mode')!=='subscribe'||!equal(p.get('hub.verify_token'),token)||!challenge||!/^\d{1,128}$/.test(challenge))return response('Forbidden',403);
+    return response(challenge);
+   }
+   if(req.method!=='POST')return response('Method not allowed',405);
+   const secret=env('WA_APP_SECRET');if(!secret)return response('Not configured',503);
+   const supplied=req.headers.get('x-hub-signature-256');
+   if(!supplied||!/^sha256=[a-f0-9]{64}$/.test(supplied))return response('Forbidden',403);
+   const reader=req.body?.getReader();if(!reader)return response('Bad request',400);
+   const parts=[];let size=0;
+   while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>262144){await reader.cancel();return response('Too large',413);}parts.push(value);}
+   const body=new Uint8Array(size);let offset=0;for(const p of parts){body.set(p,offset);offset+=p.byteLength;}
+   if(!equal(supplied,await signature(secret,body)))return response('Forbidden',403);
+   let event;try{event=JSON.parse(new TextDecoder().decode(body));}catch{return response('Bad request',400);}
+   if(event?.object!=='whatsapp_business_account'||!Array.isArray(event.entry))return response('OK');
+   if(env('WA_TEST_REPLIES_ENABLED')!=='true')return response('OK');
+   const allowed=new Set((env('WA_TEST_RECIPIENTS')??'').split(',').map(n=>n.trim()).filter(n=>/^\d{7,15}$/.test(n)));
+   if(!allowed.size||!env('WA_ACCESS_TOKEN'))return response('Not configured',503);
+   for(const entry of event.entry){
+    if(entry?.id!==WABA_ID||!Array.isArray(entry.changes))continue;
+    for(const change of entry.changes){
+     const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID||!Array.isArray(v.messages))continue;
+     for(const m of v.messages){
+      if(m?.type!=='text'||typeof m.id!=='string'||!m.id.startsWith('wamid.')||m.id.length>512||!allowed.has(m.from)||typeof m.text?.body!=='string')continue;
+      if(!['hi','hello','help','menu'].includes(m.text.body.trim().toLowerCase()))continue;
+      const age=now()-Number(m.timestamp)*1000;if(!Number.isFinite(age)||age>600000||age< -60000)continue;
+      const id=await hash(PHONE_ID+':'+m.id);
+      if(!await claim(id))continue;
+      let ok=false;try{ok=await send(m.from,'Welcome to AgriConnect! 🌱 WhatsApp test connection is working. Account linking and ordering will be enabled in the next development stage. Use https://agriconnect-q7c2.onrender.com/ for the full application.');}catch{report('send_failed');}
+      try{await finish(id,ok?'sent':'failed');}catch{report('receipt_update_failed');}
+      if(!ok)report('reply_failed');
+     }
+    }
+   }
+   return response('OK');
+  }catch{report('webhook_failed');return response('Temporary failure',503);}
+ };
+}
