@@ -26,6 +26,9 @@ jobs:
       PGDATABASE: agricitest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Run migrations and transactional acceptance in disposable PostgreSQL
         run: |
           psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap.sql
@@ -36,3 +39,10 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f tests/sql/fpo-alerts.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-guide.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-operations.sql
+
+      - name: Verify signed ONDC lifecycle on disposable shared commerce database
+        env:
+          ONDC_DISPOSABLE_CI: '1'
+        run: |
+          psql -h 127.0.0.1 -v ON_ERROR_STOP=1 -f tests/sql/ondc-local-commerce.sql
+          node tests/ondc-db.mjs
