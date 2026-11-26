@@ -105,9 +105,9 @@ begin
    select f.id,f.name,
     (select count(*) from public.memberships m where m.fpo_id=f.id and m.role='farmer' and m.status='active') farmers,
     (select count(*) from public.harvests h where h.fpo_id=f.id and h.status='pending') harvests,
-    (select count(*) from public.orders o where o.fpo_id=f.id and o.status in ('confirmed','packed','out_for_delivery')) orders,
+    (select count(*) from public.orders ord_r where ord_r.fpo_id=f.id and ord_r.status in ('confirmed','packed','out_for_delivery')) orders,
     (select coalesce(sum(i.available_kg),0) from public.inventory_lots i where i.fpo_id=f.id) stock,
-    (select coalesce(sum(o.total_paise),0) from public.orders o where o.fpo_id=f.id and o.status='delivered') revenue
+    (select coalesce(sum(ord_r.total_paise),0) from public.orders ord_r where ord_r.fpo_id=f.id and ord_r.status='delivered') revenue
    from public.fpos f join public.memberships m on m.fpo_id=f.id where m.user_id=u and m.role='manager' and m.status='active' order by f.name,f.id limit 5 offset ((page-1)*5)
   ) z;
   return jsonb_build_object('body','Your FPO report — page '||page||E'\n'||coalesce(rows_text,'No managed FPO on this page.')||E'\nTest data only. REPORT '||(page+1)||' for more; 0 for operations.');
