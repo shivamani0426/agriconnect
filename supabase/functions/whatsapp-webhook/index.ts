@@ -9,6 +9,10 @@ function dbHeaders(){
 const table=()=>env('SUPABASE_URL')+'/rest/v1/whatsapp_webhook_receipts';
 Deno.serve(createHandler({
  env,
+ harvestCommand:async(phone:string,command:string)=>{
+  const r=await fetch(env('SUPABASE_URL')+'/rest/v1/rpc/wa_harvest_command',{method:'POST',headers:dbHeaders(),body:JSON.stringify({p_phone:phone,p_command:command}),signal:AbortSignal.timeout(8000)});
+  if(!r.ok)throw new Error('Harvest command failed');const reply=await r.json();if(typeof reply!=='string'||reply.length>4096)throw new Error('Invalid harvest reply');return reply;
+ },
  orderCommand:async(phone:string,command:string)=>{
   const r=await fetch(env('SUPABASE_URL')+'/rest/v1/rpc/wa_order_command',{method:'POST',headers:dbHeaders(),body:JSON.stringify({p_phone:phone,p_command:command}),signal:AbortSignal.timeout(8000)});
   if(!r.ok)throw new Error('Order command failed');const reply=await r.json();if(typeof reply!=='string'||reply.length>4096)throw new Error('Invalid order reply');return reply;

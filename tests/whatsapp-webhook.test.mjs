@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {createHandler,signature,PHONE_ID,WABA_ID} from '../supabase/functions/whatsapp-webhook/handler.mjs';
 const secret='unit-test-secret',verify='a'.repeat(40),sender='919999999999',now=1700000000000;
 const encode=new TextEncoder();
-function fixture(overrides={},redeem,orderCommand){
+function fixture(overrides={},redeem,orderCommand,harvestCommand){
  const settings={WA_APP_SECRET:secret,WA_VERIFY_TOKEN:verify,WA_ACCESS_TOKEN:'mock-only',WA_TEST_REPLIES_ENABLED:'true',WA_TEST_RECIPIENTS:sender,...overrides};
  const receipts=new Map(),sent=[];
- const handle=createHandler({redeem,orderCommand,env:k=>settings[k],claim:async id=>{if(receipts.has(id))return false;receipts.set(id,'claimed');return true;},finish:async(id,status)=>receipts.set(id,status),send:async(to,body)=>{sent.push({to,body});return true;},now:()=>now});
+ const handle=createHandler({redeem,orderCommand,harvestCommand,env:k=>settings[k],claim:async id=>{if(receipts.has(id))return false;receipts.set(id,'claimed');return true;},finish:async(id,status)=>receipts.set(id,status),send:async(to,body)=>{sent.push({to,body});return true;},now:()=>now});
  return {handle,receipts,sent};
 }
 const url='https://example.invalid/whatsapp-webhook';
@@ -25,3 +25,7 @@ test('failed link does not report success',async()=>{const {handle,sent}=fixture
 
 test('signed shopping command uses exact allowlisted sender and deduplicates delivery',async()=>{const calls=[];const {handle,sent}=fixture({},undefined,async(phone,cmd)=>{calls.push([phone,cmd]);return 'Test quote';});const p=payload({text:'BUY 1 2'});await handle(await post(p));await handle(await post(p));assert.deepEqual(calls,[[sender,'buy 1 2']]);assert.equal(sent[0].body,'Test quote');});
 test('shopping command blocked by signature, sender and kill switch',async()=>{let n=0;const run=async()=>{n++;return 'unexpected';};const f=fixture({},undefined,run);await f.handle(await post(payload({text:'SHOP'}),'bad'));await f.handle(await post(payload({text:'CONFIRM abc',sender:'919000000000'})));await fixture({WA_TEST_REPLIES_ENABLED:'false'},undefined,run).handle(await post(payload({text:'SHOP'})));assert.equal(n,0);});
+
+test('signed harvest command preserves crop capitalization and deduplicates replay',async()=>{const calls=[];const {handle,sent}=fixture({},undefined,undefined,async(phone,cmd)=>{calls.push([phone,cmd]);return 'Harvest preview';});const p=payload({text:'HARVEST 1 | Red Onions | 25 | 2026-11-26'});await handle(await post(p));await handle(await post(p));assert.deepEqual(calls,[[sender,'HARVEST 1 | Red Onions | 25 | 2026-11-26']]);assert.equal(sent[0].body,'Harvest preview');});
+test('harvest commands reject wrong signature, sender, disabled replies and non-text media',async()=>{let n=0;const run=async()=>{n++;return 'unexpected';};const f=fixture({},undefined,undefined,run);await f.handle(await post(payload({text:'FPOS'}),'bad'));await f.handle(await post(payload({text:'SUBMIT abc',sender:'919000000000'})));await fixture({WA_TEST_REPLIES_ENABLED:'false'},undefined,undefined,run).handle(await post(payload({text:'FPOS'})));const p=payload({text:'FPOS'});p.entry[0].changes[0].value.messages[0].type='image';await f.handle(await post(p));assert.equal(n,0);});
+test('greeting routes to role-aware farmer dispatcher, shopping stays on ordering handler',async()=>{const {handle,sent}=fixture({},undefined,async()=> 'Customer shop',async()=> 'Role menu');await handle(await post(payload()));assert.equal(sent[0].body,'Role menu');const p=payload({text:'SHOP'});p.entry[0].changes[0].value.messages[0].id='wamid.test2';await handle(await post(p));assert.equal(sent[1].body,'Customer shop');});
