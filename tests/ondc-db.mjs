@@ -38,4 +38,13 @@ assert.equal((await send('cancel',t3,b2,{order_id:o.id})).order.payment.status,'
 assert.equal((await send('cancel',t3,b2,{order_id:o.id})).order.state,'cancelled');
 assert.deepEqual(query("select jsonb_build_object('available',sum(available_kg),'reserved',sum(reserved_kg)) from public.inventory_lots"),{available:10,reserved:0});
 assert.deepEqual(query("select jsonb_build_object('events',count(*),'orders',count(distinct external_id)) from private.integration_events where event_type='local_protocol_checkout'"),{events:2,orders:2});
+// An ordinary shared-engine website order consumes stock after an ONDC quote. Confirmation must revalidate.
+const t4=randomUUID(),stale=await ready(t4,buyer,8),webKey=randomUUID();
+const webCart=[{crop:'Tomatoes',grade:'A',price_paise_per_kg:3000,quantity_kg:4}];
+const webOrder=query("select to_jsonb(private.checkout_order_for('d1000000-0000-4000-8000-000000000005'::uuid,'"+FPO_A+"'::uuid,"+payload(webCart)+",'Website LOCAL TEST address','"+webKey+"'::uuid))");
+assert.ok(webOrder);
+assert.equal((await send('confirm',t4,buyer,stale)).error.code,'LOCAL_STOCK');
+assert.deepEqual(query("select jsonb_build_object('available',sum(available_kg),'reserved',sum(reserved_kg)) from public.inventory_lots"),{available:6,reserved:4});
+query("select to_jsonb(private.transition_order_for('d1000000-0000-4000-8000-000000000005'::uuid,'"+webOrder+"'::uuid,'cancelled') is null)");
+assert.deepEqual(query("select jsonb_build_object('available',sum(available_kg),'reserved',sum(reserved_kg)) from public.inventory_lots"),{available:10,reserved:0});
 console.log('PASS: signed local ONDC discovery/checkout through actual SQL engine, two-farmer allocation, payout, oversell rollback, idempotency, buyer isolation, delivery and cancellation stock restoration');
