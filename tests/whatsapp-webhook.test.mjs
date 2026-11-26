@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {createHandler,signature,PHONE_ID,WABA_ID} from '../supabase/functions/whatsapp-webhook/handler.mjs';
 const secret='unit-test-secret',verify='a'.repeat(40),sender='919999999999',now=1700000000000;
 const encode=new TextEncoder();
-function fixture(overrides={},redeem){
+function fixture(overrides={},redeem,orderCommand){
  const settings={WA_APP_SECRET:secret,WA_VERIFY_TOKEN:verify,WA_ACCESS_TOKEN:'mock-only',WA_TEST_REPLIES_ENABLED:'true',WA_TEST_RECIPIENTS:sender,...overrides};
  const receipts=new Map(),sent=[];
- const handle=createHandler({redeem,env:k=>settings[k],claim:async id=>{if(receipts.has(id))return false;receipts.set(id,'claimed');return true;},finish:async(id,status)=>receipts.set(id,status),send:async(to,body)=>{sent.push({to,body});return true;},now:()=>now});
+ const handle=createHandler({redeem,orderCommand,env:k=>settings[k],claim:async id=>{if(receipts.has(id))return false;receipts.set(id,'claimed');return true;},finish:async(id,status)=>receipts.set(id,status),send:async(to,body)=>{sent.push({to,body});return true;},now:()=>now});
  return {handle,receipts,sent};
 }
 const url='https://example.invalid/whatsapp-webhook';
@@ -22,3 +22,6 @@ test('status callbacks do not trigger replies',async()=>{const {handle,sent}=fix
 test('signed LINK command calls redemption only once, never echoes code',async()=>{const code='12345678-1234-4123-8123-123456789abc',calls=[];const {handle,sent}=fixture({},async(phone,c)=>{calls.push([phone,c]);return 'linked';});const p=payload({text:'LINK '+code});await handle(await post(p));await handle(await post(p));assert.deepEqual(calls,[[sender,code]]);assert.match(sent[0].body,/linked successfully/);assert.ok(!sent[0].body.includes(code));});
 test('link rejects unsigned, wrong sender and malformed commands',async()=>{let calls=0;const {handle}=fixture({},async()=>{calls++;return 'linked';});const code='12345678-1234-4123-8123-123456789abc';await handle(await post(payload({text:'LINK '+code}),'wrong'));await handle(await post(payload({text:'LINK '+code,sender:'919000000000'})));await handle(await post(payload({text:'LINK 123456'})));assert.equal(calls,0);});
 test('failed link does not report success',async()=>{const {handle,sent}=fixture({},async()=> 'invalid');await handle(await post(payload({text:'LINK 12345678-1234-4123-8123-123456789abc'})));assert.match(sent[0].body,/Link not completed/);});
+
+test('signed shopping command uses exact allowlisted sender and deduplicates delivery',async()=>{const calls=[];const {handle,sent}=fixture({},undefined,async(phone,cmd)=>{calls.push([phone,cmd]);return 'Test quote';});const p=payload({text:'BUY 1 2'});await handle(await post(p));await handle(await post(p));assert.deepEqual(calls,[[sender,'buy 1 2']]);assert.equal(sent[0].body,'Test quote');});
+test('shopping command blocked by signature, sender and kill switch',async()=>{let n=0;const run=async()=>{n++;return 'unexpected';};const f=fixture({},undefined,run);await f.handle(await post(payload({text:'SHOP'}),'bad'));await f.handle(await post(payload({text:'CONFIRM abc',sender:'919000000000'})));await fixture({WA_TEST_REPLIES_ENABLED:'false'},undefined,run).handle(await post(payload({text:'SHOP'})));assert.equal(n,0);});

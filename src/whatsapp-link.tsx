@@ -8,7 +8,7 @@ export function WhatsAppLink(){
  async function refresh(){const s=await result(client().rpc('wa_status')) as Status;if(mounted.current){setStatus(s);if(s.status!=='pending')setTicket(null);}}
  useEffect(()=>{mounted.current=true;refresh().catch(()=>{if(mounted.current)setError('Unable to load WhatsApp status. Refresh to try again.');});return()=>{mounted.current=false;};},[]);
  async function run(fn:()=>Promise<void>){if(busy)return;setBusy(true);setError('');try{await fn();}catch(e){if(mounted.current)setError(e instanceof Error?e.message:'Unable to complete request.');}finally{if(mounted.current)setBusy(false);}}
- return <section className="panel"><h2>WhatsApp account</h2><p>Test numbers only. Your permanent account role stays the same. Linking does not enable WhatsApp ordering.</p>
+ return <section className="panel"><h2>WhatsApp account</h2><p>Test numbers only. Your permanent account role stays the same. Linked customers can send SHOP to the test number to place simulated orders. Farmer and manager ordering is disabled.</p>
  {error&&<p role="alert">{error}</p>}
  <p role="status">{status?.status==='linked'?'Linked · number ending '+status.last4:status?.status==='pending'?'Awaiting WhatsApp confirmation · number ending '+status.last4:status?.status==='unlinked'?'Not linked':'Checking status…'}</p>
  <button className="quiet" disabled={busy} onClick={()=>void run(refresh)}>Refresh linking status</button>
