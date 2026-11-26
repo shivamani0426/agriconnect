@@ -1,7 +1,7 @@
 name: WhatsApp relay verification
 on:
   push:
-    branches: [feat/whatsapp-05-relay, main]
+    branches: [feat/whatsapp-05-relay, feat/whatsapp-05-advanced, main]
   pull_request:
     paths:
       - 'supabase/**'
@@ -16,6 +16,8 @@ jobs:
         with:
           node-version: '22'
       - run: node --test tests/whatsapp*.test.mjs
+      - name: Verify optional voice service request contract
+        run: python3 -m unittest discover -s services/whatsapp-voice -p 'test_*.py'
   database:
     runs-on: ubuntu-24.04
     services:
@@ -43,3 +45,10 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f tests/sql/bootstrap.sql
           for f in supabase/migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
           for f in tests/sql/whatsapp-*.sql; do psql -v ON_ERROR_STOP=1 -f "$f"; done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify competing SQL transactions
+        env:
+          WA_DISPOSABLE_CI: '1'
+        run: node tests/whatsapp-concurrency.mjs

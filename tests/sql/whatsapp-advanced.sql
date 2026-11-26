@@ -1,0 +1,71 @@
+begin;
+insert into auth.users(id,email) values('a9600000-0000-4000-8000-000000000001','manager@example.invalid'),('a9600000-0000-4000-8000-000000000002','farmer@example.invalid'),('a9600000-0000-4000-8000-000000000003','customer@example.invalid'),('a9600000-0000-4000-8000-000000000004','customer@example.invalid'),('a9600000-0000-4000-8000-000000000005','manager@example.invalid');
+insert into public.profiles(id,display_name,account_role) select id,'Advanced QA',split_part(email,'@',1) from auth.users;
+insert into public.fpos(id,name,location) values('b9600000-0000-4000-8000-000000000001','QA FPO','Test'),('b9600000-0000-4000-8000-000000000002','Other FPO','Test');
+insert into public.memberships(fpo_id,user_id,role,status) values('b9600000-0000-4000-8000-000000000001','a9600000-0000-4000-8000-000000000001','manager','active'),('b9600000-0000-4000-8000-000000000001','a9600000-0000-4000-8000-000000000002','farmer','active'),('b9600000-0000-4000-8000-000000000002','a9600000-0000-4000-8000-000000000005','manager','active');
+insert into public.harvests(id,fpo_id,farmer_id,crop,quantity_kg,harvest_date) values('c9600000-0000-4000-8000-000000000001','b9600000-0000-4000-8000-000000000001','a9600000-0000-4000-8000-000000000002','QA Tomatoes',25,'2026-01-01'),('c9600000-0000-4000-8000-000000000002','b9600000-0000-4000-8000-000000000001','a9600000-0000-4000-8000-000000000002','QA Beans',10,'2026-01-01'),('c9600000-0000-4000-8000-000000000003','b9600000-0000-4000-8000-000000000001','a9600000-0000-4000-8000-000000000002','QA Photo crop',5,'2026-01-01');
+insert into private.wa_links(user_id,phone) values('a9600000-0000-4000-8000-000000000001','919000009601'),('a9600000-0000-4000-8000-000000000002','919000009602'),('a9600000-0000-4000-8000-000000000003','919000009603'),('a9600000-0000-4000-8000-000000000004','919000009604'),('a9600000-0000-4000-8000-000000000005','919000009605');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','a9600000-0000-4000-8000-000000000001',true);
+select public.review_harvest('c9600000-0000-4000-8000-000000000001','A',3000,true,'');
+select public.review_harvest('c9600000-0000-4000-8000-000000000002','A',2000,true,'');
+reset role;
+do $qa$ begin
+ if has_table_privilege('authenticated','private.wa_advanced_cart','select') or has_table_privilege('anon','private.wa_media_jobs','select') or has_function_privilege('authenticated','public.wa_advanced_prepare(text,text,text,text)','execute') or has_function_privilege('authenticated','public.wa_media_claim(text,text,text,uuid,text)','execute') or has_function_privilege('anon','public.wa_media_cleanup()','execute') then raise exception 'FAIL permissions';end if;
+end $qa$;
+set local role service_role;
+do $qa$ declare q jsonb; id text; body text; begin
+ -- Default flag is off: old language picker remains.
+ if public.wa_guide('919000009602','ನಮಸ್ಕಾರ',false)->>'body' not like '%English%' then raise exception 'FAIL rollback flag';end if;
+ perform set_config('app.wa_advanced','on',true);
+ if public.wa_guide('919000009602','ನಮಸ್ಕಾರ',false)->>'body' not like '%ಬೆಳೆ ಸಲ್ಲಿಸಿ%' then raise exception 'FAIL language detection';end if;
+ if public.wa_guide('919000009602','ನನ್ನ ಆದಾಯ',false)->>'body' not like '%Approved: 35%' then raise exception 'FAIL farmer summary';end if;
+ perform public.wa_guide('919000009603','HI',false);perform public.wa_guide('919000009603','1',false);
+ if public.wa_guide('919000009603','SEARCH Tomatoes',false)->>'body' not like '%QA Tomatoes%' then raise exception 'FAIL search';end if;
+ if public.wa_guide('919000009603','ADD 1 2',false)->>'body' not like '%Added%' then raise exception 'FAIL add';end if;
+ perform public.wa_guide('919000009603','SEARCH Beans',false);
+ if public.wa_guide('919000009603','ADD 1 3',false)->>'body' not like '%Added%' then raise exception 'FAIL add second';end if;
+ if public.wa_guide('919000009603','my cart',false)->>'body' not like '%₹120.00%' then raise exception 'FAIL cart total';end if;
+ if public.wa_guide('919000009603','REMOVE 2',false)->>'body' not like '%removed%' then raise exception 'FAIL remove';end if;
+ perform public.wa_guide('919000009603','ADD 1 3',false);
+ q:=public.wa_guide('919000009603','CHECKOUT',false);id:=q->'buttons'->0->>'id';
+ if id is null or q->>'body' not like '%₹120.00%' then raise exception 'FAIL checkout preview %',q;end if;
+ if public.wa_guide('919000009604',id,true)->>'body' like '%Test order confirmed%' then raise exception 'FAIL cross account';end if;
+ if public.wa_guide('919000009603',id,false)->>'body' like '%Test order confirmed%' then raise exception 'FAIL text confirmation';end if;
+ q:=public.wa_guide('919000009603','CHECKOUT',false);id:=q->'buttons'->0->>'id';
+ if public.wa_guide('919000009603',id,true)->>'body' not like '%Test order confirmed%' then raise exception 'FAIL confirmed cart';end if;
+ if public.wa_guide('919000009603',id,true)->>'body' not like '%already confirmed%' then raise exception 'FAIL duplicate cart';end if;
+ if public.wa_guide('919000009603','show my orders',false)->>'body' not like '%₹120.00%' then raise exception 'FAIL history';end if;
+ if public.wa_guide('919000009604','HISTORY',false)->>'body' like '%₹120.00%' then raise exception 'FAIL history privacy';end if;
+ if public.wa_guide('919000009601','REPORT',false)->>'body' not like '%QA FPO%' then raise exception 'FAIL report';end if;
+ if public.wa_guide('919000009605','REPORT',false)->>'body' like '%QA FPO%' then raise exception 'FAIL FPO privacy';end if;
+ if public.wa_media_claim(repeat('a',64),'919000009603','image','c9600000-0000-4000-8000-000000000003','jpg')->>'state'<>'denied' then raise exception 'FAIL photo role';end if;
+ if public.wa_media_claim(repeat('b',64),'919000009602','audio',null,'ogg')->>'state'<>'denied' then raise exception 'FAIL voice consent';end if;
+ perform public.wa_guide('919000009602','/VOICE ON',false);
+ if public.wa_media_claim(repeat('b',64),'919000009602','audio',null,'ogg')->>'state'<>'claimed' then raise exception 'FAIL voice claim';end if;
+ if not public.wa_media_finish(repeat('b',64),'919000009602',true,'Confirm an order') then raise exception 'FAIL voice preview';end if;
+ q:=public.wa_relay_take('919000009602',repeat('b',64));
+ if q->'reply'->>'body' not like '%not executed%' then raise exception 'FAIL voice readback';end if;
+ perform public.wa_relay_finish(repeat('b',64),1,'accepted','wamid.voice',10);
+ q:=public.wa_media_claim(repeat('c',64),'919000009602','image','c9600000-0000-4000-8000-000000000003','jpg');
+ if q->>'state'<>'claimed' then raise exception 'FAIL photo claim';end if;
+ perform set_config('qa.photo',q->>'path',true);
+end $qa$;
+reset role;
+-- Disposable storage metadata simulates a successful private Storage upload.
+insert into storage.objects(bucket_id,name) values('harvest-photos',current_setting('qa.photo'));
+set local role service_role;
+do $qa$ declare q jsonb; begin
+ if not public.wa_media_finish(repeat('c',64),'919000009602',true,null) then raise exception 'FAIL photo finish';end if;
+ q:=public.wa_relay_take('919000009602',repeat('c',64));
+ if q->'reply'->>'body' not like '%Photo attached%' then raise exception 'FAIL attached reply %',q;end if;
+ if public.wa_media_claim(repeat('c',64),'919000009602','image','c9600000-0000-4000-8000-000000000003','jpg')->>'state'<>'duplicate' then raise exception 'FAIL media replay';end if;
+ if public.wa_media_claim(repeat('d',64),'919000009602','image','c9600000-0000-4000-8000-000000000003','jpg')->>'state'<>'denied' then raise exception 'FAIL photo replace';end if;
+end $qa$;
+reset role;
+do $qa$ begin
+ if (select count(*) from public.orders)<>1 or (select jsonb_array_length(items) from public.orders)<>2 or (select sum(available_kg) from public.inventory_lots)<>30 then raise exception 'FAIL stock or order invariant';end if;
+ if (select photo_path from public.harvests where id='c9600000-0000-4000-8000-000000000003') is distinct from current_setting('qa.photo') then raise exception 'FAIL stored photo';end if;
+end $qa$;
+select 'PASS: advanced intent, language, scoped summaries/reports, cart, history, permission, media and order invariants' result;
+rollback;

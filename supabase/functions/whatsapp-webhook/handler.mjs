@@ -10,7 +10,7 @@ export async function signature(secret,body){
  return 'sha256='+hex(await crypto.subtle.sign('HMAC',key,body));
 }
 const hash=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
-export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,guide,prepare,dispatch,statusCallback,now=()=>Date.now(),report=()=>{}}){
+export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,guide,prepare,dispatch,statusCallback,media,now=()=>Date.now(),report=()=>{}}){
  return async req=>{
   try{
    if(req.method==='GET'){
@@ -44,6 +44,13 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
      }
      for(const m of Array.isArray(v.messages)?v.messages:[]){
       if(typeof m?.id!=='string'||!m.id.startsWith('wamid.')||m.id.length>512||!allowed.has(m.from) )continue;
+      if(media&&['audio','image'].includes(m.type)){
+       const age=now()-Number(m.timestamp)*1000;
+       if(!Number.isFinite(age)||age>600000||age< -60000)continue;
+       const id=await hash(PHONE_ID+':'+m.id);
+       await media({id,phone:m.from,kind:m.type,media:m[m.type]});
+       continue;
+      }
       const button=m.type==='interactive'&&m.interactive?.type==='button_reply'&&typeof m.interactive?.button_reply?.id==='string';
       const list=!!prepare&&m.type==='interactive'&&m.interactive?.type==='list_reply'&&typeof m.interactive?.list_reply?.id==='string';
       if(!button&&!list&&(m.type!=='text'||typeof m.text?.body!=='string'))continue;
