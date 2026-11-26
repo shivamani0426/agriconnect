@@ -167,11 +167,20 @@ create or replace function public.wa_guide(p_phone text,p_text text,p_button boo
 revoke all on function private.wa_money(bigint),private.wa_clean(text,integer),private.wa_intent(text,text),private.wa_guide(text,text,boolean),public.wa_guide(text,text,boolean) from public,anon,authenticated,service_role;
 grant execute on function private.wa_guide(text,text,boolean),public.wa_guide(text,text,boolean) to service_role;
 -- Opt-in per transaction: migration alone does not switch the live guide.
-create function public.wa_advanced_prepare(p_id text,p_phone text,p_route text,p_command text) returns boolean language plpgsql security invoker set search_path='' as $
+create function private.wa_advanced_prepare(p_id text,p_phone text,p_route text,p_command text) returns boolean language plpgsql security definer set search_path='' as $$
+declare ok boolean;
 begin
  perform set_config('app.wa_advanced','on',true);
- return private.wa_relay_prepare(p_id,p_phone,p_route,p_command);
-end $;
-revoke all on function public.wa_advanced_prepare(text,text,text,text) from public,anon,authenticated,service_role;
-grant execute on function public.wa_advanced_prepare(text,text,text,text) to service_role;
+ ok:=private.wa_relay_prepare(p_id,p_phone,p_route,p_command);
+ if ok then
+  -- Append the discoverable text fallback only to generated role menus, after list validation.
+  update private.wa_relay_outbox q set reply=jsonb_set(q.reply,'{body}',to_jsonb((q.reply->>'body')||E'\nMORE: additional commands. /MORE: leave current input.'))
+   where q.message_hash=p_id and q.reply ? 'list' and length(q.reply->>'body')<900
+   and exists(select 1 from private.wa_guides g where g.user_id=q.link_user and g.step='menu');
+ end if;
+ return ok;
+end $$;
+create function public.wa_advanced_prepare(p_id text,p_phone text,p_route text,p_command text) returns boolean language sql security invoker set search_path='' as $$select private.wa_advanced_prepare(p_id,p_phone,p_route,p_command)$$;
+revoke all on function private.wa_advanced_prepare(text,text,text,text),public.wa_advanced_prepare(text,text,text,text) from public,anon,authenticated,service_role;
+grant execute on function private.wa_advanced_prepare(text,text,text,text),public.wa_advanced_prepare(text,text,text,text) to service_role;
 commit;
