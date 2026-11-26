@@ -58,5 +58,37 @@ do $qa$ begin
  if (select count(*) from public.harvests where status='approved')<>1 or (select count(*) from public.harvests where status='rejected' and rejection_reason='Damaged crop')<>1 or (select sum(available_kg) from public.inventory_lots)<>22 or (select sum(reserved_kg) from public.inventory_lots)<>0 or (select count(*) from public.orders where status='cancelled' and payment_status='simulated_refunded')<>1 or (select count(*) from public.orders where status='delivered')<>1 or (select count(*) from public.memberships where user_id='a9000000-0000-4000-8000-000000000005' and status='active')<>1 then raise exception 'FAIL shared state';end if;
  if has_function_privilege('authenticated','private.transition_order_for(uuid,uuid,text)','execute') or has_function_privilege('service_role','private.review_harvest_for(uuid,uuid,text,integer,boolean,text)','execute') or has_function_privilege('authenticated','private.review_member_for(uuid,uuid,uuid,boolean)','execute') then raise exception 'FAIL core privilege';end if;
 end $qa$;
+-- Website order also supports guided customer cancellation; stale preview cannot cancel after packing.
+set local role authenticated;
+select set_config('request.jwt.claim.sub','a9000000-0000-4000-8000-000000000003',true);
+select set_config('qa.ops_order',public.checkout_order('b9000000-0000-4000-8000-000000000001','[{"crop":"QA Tomatoes","grade":"A","price_paise_per_kg":3000,"quantity_kg":4}]','Test address',gen_random_uuid())::text,true);
+reset role;
+set local role service_role;
+do $qa$ declare id text; begin
+ perform public.wa_guide('919000009003','0',false);perform public.wa_guide('919000009003','4',false);
+ id:=public.wa_guide('919000009003','1',false)->'buttons'->0->>'id';
+ if id is null then raise exception 'FAIL website order cancellation preview';end if;
+ perform set_config('qa.stale_cancel',id,true);
+ perform public.wa_guide('919000009001','5',false);perform public.wa_guide('919000009001','1',false);
+ id:=public.wa_guide('919000009001','1',false)->'buttons'->0->>'id';
+ if public.wa_guide('919000009001',id,true)->>'body' not like '%Action completed%' then raise exception 'FAIL website order pack';end if;
+ if public.wa_guide('919000009003',current_setting('qa.stale_cancel'),true)->>'body' like '%Action completed%' then raise exception 'FAIL stale customer cancellation';end if;
+ perform public.wa_guide('919000009001','5',false);perform public.wa_guide('919000009001','1',false);
+ id:=public.wa_guide('919000009001','2',false)->'buttons'->0->>'id';
+ if id is null then raise exception 'FAIL manager cancel preview';end if;
+ if public.wa_guide('919000009001',replace(id,'ac_confirm:','ac_cancel:'),true)->>'body' not like '%Draft cancelled%' then raise exception 'FAIL cancel action button';end if;
+ perform public.wa_guide('919000009001','5',false);perform public.wa_guide('919000009001','1',false);
+ id:=public.wa_guide('919000009001','2',false)->'buttons'->0->>'id';
+ if public.wa_guide('919000009001',id,true)->>'body' not like '%Action completed%' then raise exception 'FAIL packed manager cancellation';end if;
+ perform public.wa_guide('919000009001','3',false);
+ if public.wa_guide('919000009001','2',false)->>'body' not like '%ಬೆಳೆ ಪರಿಶೀಲನೆ%' then raise exception 'FAIL Kannada manager menu';end if;
+ perform public.wa_guide('919000009003','3',false);
+ if public.wa_guide('919000009003','3',false)->>'body' not like '%ఆర్డర్ రద్దు చేయండి%' then raise exception 'FAIL Telugu customer menu';end if;
+end $qa$;
+reset role;
+do $qa$ begin
+ if not exists(select 1 from public.orders where id=current_setting('qa.ops_order')::uuid and status='cancelled' and payment_status='simulated_refunded') or (select sum(available_kg) from public.inventory_lots)<>22 or (select sum(reserved_kg) from public.inventory_lots)<>0 then raise exception 'FAIL manager cancellation inventory';end if;
+end $qa$;
+select 'PASS: stale cancellation rejected, website order channel, manager packed cancellation, cancel button, multilingual menus' result;
 select 'PASS: WhatsApp manager harvest approval/rejection, membership, inventory, delivery and customer cancellation with shared authorization and stock' result;
 rollback;
