@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {createHandler,signature,PHONE_ID,WABA_ID} from '../supabase/functions/whatsapp-webhook/handler.mjs';
 const secret='unit-test-secret',verify='a'.repeat(40),sender='919999999999',now=1700000000000;
 const encode=new TextEncoder();
-function fixture(overrides={}){
+function fixture(overrides={},redeem){
  const settings={WA_APP_SECRET:secret,WA_VERIFY_TOKEN:verify,WA_ACCESS_TOKEN:'mock-only',WA_TEST_REPLIES_ENABLED:'true',WA_TEST_RECIPIENTS:sender,...overrides};
  const receipts=new Map(),sent=[];
- const handle=createHandler({env:k=>settings[k],claim:async id=>{if(receipts.has(id))return false;receipts.set(id,'claimed');return true;},finish:async(id,status)=>receipts.set(id,status),send:async(to,body)=>{sent.push({to,body});return true;},now:()=>now});
+ const handle=createHandler({redeem,env:k=>settings[k],claim:async id=>{if(receipts.has(id))return false;receipts.set(id,'claimed');return true;},finish:async(id,status)=>receipts.set(id,status),send:async(to,body)=>{sent.push({to,body});return true;},now:()=>now});
  return {handle,receipts,sent};
 }
 const url='https://example.invalid/whatsapp-webhook';
@@ -18,3 +18,7 @@ test('authenticated Hi sends one reply across webhook retries',async()=>{const {
 test('ignore wrong account/number, unauthorized recipients, stale messages and noncommands',async()=>{const {handle,sent}=fixture();for(const opts of [{waba:'1'},{phone:'2'},{sender:'919000000000'},{timestamp:now/1000-601},{text:'place order'}])assert.equal((await handle(await post(payload(opts)))).status,200);assert.equal(sent.length,0);});
 test('kill switch prevents replies and no credentials fail closed',async()=>{const f=fixture({WA_TEST_REPLIES_ENABLED:'false'});assert.equal((await f.handle(await post(payload()))).status,200);assert.equal(f.sent.length,0);assert.equal((await fixture({WA_APP_SECRET:''}).handle(await post(payload()))).status,503);assert.equal((await fixture({WA_ACCESS_TOKEN:''}).handle(await post(payload()))).status,503);});
 test('status callbacks do not trigger replies',async()=>{const {handle,sent}=fixture();const p=payload();delete p.entry[0].changes[0].value.messages;p.entry[0].changes[0].value.statuses=[{id:'wamid.test1',status:'delivered'}];assert.equal((await handle(await post(p))).status,200);assert.equal(sent.length,0);});
+
+test('signed LINK command calls redemption only once, never echoes code',async()=>{const code='12345678-1234-4123-8123-123456789abc',calls=[];const {handle,sent}=fixture({},async(phone,c)=>{calls.push([phone,c]);return 'linked';});const p=payload({text:'LINK '+code});await handle(await post(p));await handle(await post(p));assert.deepEqual(calls,[[sender,code]]);assert.match(sent[0].body,/linked successfully/);assert.ok(!sent[0].body.includes(code));});
+test('link rejects unsigned, wrong sender and malformed commands',async()=>{let calls=0;const {handle}=fixture({},async()=>{calls++;return 'linked';});const code='12345678-1234-4123-8123-123456789abc';await handle(await post(payload({text:'LINK '+code}),'wrong'));await handle(await post(payload({text:'LINK '+code,sender:'919000000000'})));await handle(await post(payload({text:'LINK 123456'})));assert.equal(calls,0);});
+test('failed link does not report success',async()=>{const {handle,sent}=fixture({},async()=> 'invalid');await handle(await post(payload({text:'LINK 12345678-1234-4123-8123-123456789abc'})));assert.match(sent[0].body,/Link not completed/);});

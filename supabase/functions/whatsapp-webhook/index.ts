@@ -9,6 +9,10 @@ function dbHeaders(){
 const table=()=>env('SUPABASE_URL')+'/rest/v1/whatsapp_webhook_receipts';
 Deno.serve(createHandler({
  env,
+ redeem:async(phone:string,code:string)=>{
+  const r=await fetch(env('SUPABASE_URL')+'/rest/v1/rpc/wa_redeem',{method:'POST',headers:dbHeaders(),body:JSON.stringify({p_phone:phone,p_code:code}),signal:AbortSignal.timeout(5000)});
+  if(!r.ok)throw new Error('Link redemption failed');return await r.json();
+ },
  claim:async (id:string)=>{
   const r=await fetch(table()+'?on_conflict=message_hash',{method:'POST',headers:{...dbHeaders(),Prefer:'resolution=ignore-duplicates,return=representation'},body:JSON.stringify({message_hash:id}),signal:AbortSignal.timeout(5000)});
   if(!r.ok)throw new Error('Receipt claim failed');const rows=await r.json();return Array.isArray(rows)&&rows.length===1;

@@ -1,0 +1,34 @@
+begin;
+insert into auth.users(id,email) values('b0000000-0000-4000-8000-000000000001','farmer@example.invalid'),('b0000000-0000-4000-8000-000000000002','manager@example.invalid'),('b0000000-0000-4000-8000-000000000003','customer@example.invalid');
+insert into public.profiles(id,display_name,account_role) select id,'QA',split_part(email,'@',1) from auth.users;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','b0000000-0000-4000-8000-000000000001',true);
+select set_config('wa.code',(public.wa_begin('919000000001')->>'code'),true);
+do $$ begin
+if public.wa_status()->>'status'<>'pending' then raise exception 'pending status';end if;
+if has_function_privilege('authenticated','public.wa_redeem(text,uuid)','execute') or has_function_privilege('anon','public.wa_begin(text)','execute') or has_table_privilege('authenticated','private.wa_links','select') then raise exception 'permissions';end if;
+end $$;
+select set_config('request.jwt.claim.sub','b0000000-0000-4000-8000-000000000002',true);
+do $$ begin if public.wa_status()->>'status'<>'unlinked' then raise exception 'cross-account leak';end if;end $$;
+select set_config('wa.other',(public.wa_begin('919000000001')->>'code'),true);
+reset role;
+set local role service_role;
+do $$ begin
+if public.wa_redeem('919000000009',current_setting('wa.code')::uuid)<>'invalid' then raise exception 'wrong sender';end if;
+if public.wa_redeem('919000000001',current_setting('wa.code')::uuid)<>'linked' then raise exception 'link failed';end if;
+if public.wa_redeem('919000000001',current_setting('wa.code')::uuid)<>'invalid' then raise exception 'replay';end if;
+if public.wa_redeem('919000000001',current_setting('wa.other')::uuid)<>'unavailable' then raise exception 'duplicate phone';end if;
+end $$;
+reset role;
+set local role authenticated;
+select set_config('request.jwt.claim.sub','b0000000-0000-4000-8000-000000000001',true);
+do $$ begin if public.wa_status()->>'status'<>'linked' or public.wa_status()->>'last4'<>'0001' or private.account_role()<>'farmer' then raise exception 'linked status or role';end if;end $$;
+select public.wa_unlink();
+do $$ begin if public.wa_status()->>'status'<>'unlinked' then raise exception 'unlink failed';end if;end $$;
+reset role;
+update private.wa_link_requests set expires_at=clock_timestamp()-interval '1 second' where user_id='b0000000-0000-4000-8000-000000000002';
+set local role service_role;
+do $$ begin if public.wa_redeem('919000000001',current_setting('wa.other')::uuid)<>'invalid' then raise exception 'expired code';end if;end $$;
+reset role;
+select 'PASS: account-bound one-time code, sender binding, role preservation, uniqueness, expiry, unlink and permissions' result;
+rollback;

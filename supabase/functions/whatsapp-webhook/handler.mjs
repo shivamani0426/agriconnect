@@ -1,4 +1,4 @@
-// Test-only WhatsApp transport. No commerce, account linking, media or private data access.
+// Test-only WhatsApp transport. No commerce or media. Linking is restricted to signed, allowlisted senders.
 export const PHONE_ID='1456298224232496';
 export const WABA_ID='2111995459517329';
 const enc=new TextEncoder();
@@ -10,7 +10,7 @@ export async function signature(secret,body){
  return 'sha256='+hex(await crypto.subtle.sign('HMAC',key,body));
 }
 const hash=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
-export function createHandler({env,claim,finish,send,now=()=>Date.now(),report=()=>{}}){
+export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',now=()=>Date.now(),report=()=>{}}){
  return async req=>{
   try{
    if(req.method==='GET'){
@@ -39,11 +39,17 @@ export function createHandler({env,claim,finish,send,now=()=>Date.now(),report=(
      const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID||!Array.isArray(v.messages))continue;
      for(const m of v.messages){
       if(m?.type!=='text'||typeof m.id!=='string'||!m.id.startsWith('wamid.')||m.id.length>512||!allowed.has(m.from)||typeof m.text?.body!=='string')continue;
-      if(!['hi','hello','help','menu'].includes(m.text.body.trim().toLowerCase()))continue;
+      const command=m.text.body.trim().toLowerCase();
+      const link=/^link ([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(command);
+      if(!link&&!['hi','hello','help','menu'].includes(command))continue;
       const age=now()-Number(m.timestamp)*1000;if(!Number.isFinite(age)||age>600000||age< -60000)continue;
       const id=await hash(PHONE_ID+':'+m.id);
       if(!await claim(id))continue;
-      let ok=false;try{ok=await send(m.from,'Welcome to AgriConnect! 🌱 WhatsApp test connection is working. Account linking and ordering will be enabled in the next development stage. Use https://agriconnect-q7c2.onrender.com/ for the full application.');}catch{report('send_failed');}
+      let ok=false;try{
+       let reply='Welcome to AgriConnect! 🌱 To link your account, sign in at https://agriconnect-q7c2.onrender.com/ and open Profile → WhatsApp account. Ordering is not enabled yet.';
+       if(link){const outcome=await redeem(m.from,link[1]);reply=outcome==='linked'?'WhatsApp linked successfully! Open your AgriConnect profile and refresh linking status. Your account role has not changed.':'Link not completed. Check your number and use a fresh code from your own AgriConnect profile. If this number is already linked, unlink it from that account first.';}
+       ok=await send(m.from,reply);
+      }catch{report('send_failed');}
       try{await finish(id,ok?'sent':'failed');}catch{report('receipt_update_failed');}
       if(!ok)report('reply_failed');
      }
