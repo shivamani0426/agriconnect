@@ -1,4 +1,7 @@
 import { createHandler, PHONE_ID } from './handler.mjs';
+import { classifyResponse, relayWithRetry } from './relay.mjs';
+import {createRelay,authorizeWorker} from './transport.mjs';
+declare const EdgeRuntime: {waitUntil(promise:Promise<unknown>):void} | undefined;
 const env=(name:string)=>Deno.env.get(name);
 function dbHeaders(){
  let secret:string|undefined;try{const keys=JSON.parse(env('SUPABASE_SECRET_KEYS')??'{}');secret=typeof keys.default==='string'?keys.default:undefined;}catch{/* use legacy key */}
@@ -7,7 +10,7 @@ function dbHeaders(){
  return {'apikey':legacy,'Authorization':'Bearer '+legacy,'Content-Type':'application/json'};
 }
 const table=()=>env('SUPABASE_URL')+'/rest/v1/whatsapp_webhook_receipts';
-Deno.serve(createHandler({
+const legacyHandler=createHandler({
  env,
  guide:async(phone:string,command:string,button:boolean)=>{
   const r=await fetch(env('SUPABASE_URL')+'/rest/v1/rpc/wa_guide',{method:'POST',headers:dbHeaders(),body:JSON.stringify({p_phone:phone,p_text:command,p_button:button}),signal:AbortSignal.timeout(8000)});
@@ -43,8 +46,40 @@ Deno.serve(createHandler({
   const buttons=typeof reply==='string'?undefined:reply.buttons;
   if(buttons&&(!Array.isArray(buttons)||buttons.length<1||buttons.length>3||body.length>1024||buttons.some(b=>!/^ac_(confirm|cancel):[0-9a-f-]{36}$/.test(b.id)||b.title.length>20)))throw new Error('Invalid interactive response');
   const message=buttons?{type:'interactive',interactive:{type:'button',body:{text:body},action:{buttons:buttons.map(b=>({type:'reply',reply:b}))}}}:{type:'text',text:{preview_url:false,body}};
+  const result=await relayWithRetry(async()=>{
   const r=await fetch('https://graph.facebook.com/v25.0/'+PHONE_ID+'/messages',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to,...message}),signal:AbortSignal.timeout(8000)});
-  if(!r.ok){let code:number|undefined;let subcode:number|undefined;try{const e=(await r.json()).error;if(Number.isInteger(e?.code))code=e.code;if(Number.isInteger(e?.error_subcode))subcode=e.error_subcode;}catch{/* never log raw provider response */}console.warn('WhatsApp Graph reply rejected',r.status,'code',code??'unknown','subcode',subcode??'unknown');return false;}return true;
+  if(!r.ok){let code:number|undefined;let subcode:number|undefined;try{const e=(await r.json()).error;if(Number.isInteger(e?.code))code=e.code;if(Number.isInteger(e?.error_subcode))subcode=e.error_subcode;}catch{/* never log raw provider response */}console.warn('WhatsApp Graph reply rejected',r.status,'code',code??'unknown','subcode',subcode??'unknown');return {state:classifyResponse(r.status,code)};}return {state:'accepted'};
+  },{report:event=>console.warn(event)});
+  return result?.state==='accepted';
  },
  report:(event:string)=>console.warn(event)
-}));
+});
+
+async function rpc(name:string,body:Record<string,unknown>){
+ const r=await fetch(env('SUPABASE_URL')+'/rest/v1/rpc/'+name,{method:'POST',headers:dbHeaders(),body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});
+ if(!r.ok)throw new Error('Relay database operation failed');
+ const data=await r.text();return data?JSON.parse(data):null;
+}
+const relay=createRelay({env,rpc,report:(event:string)=>console.info(event)});
+const relayHandler=createHandler({env,prepare:relay.prepare,statusCallback:relay.statusCallback,
+ dispatch:async(phone:string,id:string)=>{
+  const task=(async()=>{
+   await relay.process(phone,id);
+   // Bounded catch-up for messages durably queued during an in-flight send.
+   for(let i=0;i<3;i++){if(!await relay.process(phone))break;}
+  })().catch(()=>console.warn('wa_relay_worker_failed'));
+  if(typeof EdgeRuntime!=='undefined')EdgeRuntime.waitUntil(task);else await task;
+ },report:(event:string)=>console.warn(event)});
+const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
+Deno.serve(async req=>{
+ const path=new URL(req.url).pathname;
+ const enabled=env('WA_RELAY_V2_ENABLED')==='true';
+ if(path.endsWith('/relay')||path.endsWith('/health')){
+  if(req.method!=='POST')return json({error:'Method not allowed'},405);
+  if(!await authorizeWorker(env,req.headers.get('authorization')))return json({error:'Forbidden'},403);
+  if(!enabled)return json({enabled:false},503);
+  try{return json(path.endsWith('/health')?await relay.health():await relay.drain());}
+  catch{return json({error:'Relay unavailable'},503);}
+ }
+ return enabled?relayHandler(req):legacyHandler(req);
+});
