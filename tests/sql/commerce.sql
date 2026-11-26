@@ -88,11 +88,11 @@ reset role;
 select 'PASS: permanent roles, cross-role writes and web/demo checkout denied' result;
 -- WhatsApp integration using disposable commerce fixtures, after all prior assertions.
 insert into private.wa_links(user_id,phone) values('a5000000-0000-4000-8000-000000000004','919000000004'),('a5000000-0000-4000-8000-000000000002','919000000002'),('a5000000-0000-4000-8000-000000000001','919000000001'),('a5000000-0000-4000-8000-000000000005','919000000005');
-do $ begin
+do $$ begin
  if has_function_privilege('authenticated','public.wa_order_command(text,text)','execute') or has_function_privilege('anon','public.wa_order_command(text,text)','execute') or has_function_privilege('authenticated','private.checkout_order_for(uuid,uuid,jsonb,text,uuid)','execute') or has_table_privilege('authenticated','private.wa_shop','select') then raise exception 'FAIL WhatsApp privileges';end if;
-end $;
+end $$;
 set local role service_role;
-do $ declare r text; begin
+do $$ declare r text; begin
  if public.wa_order_command('919000000009','SHOP') not like 'Link your%' then raise exception 'FAIL unlinked';end if;
  if public.wa_order_command('919000000002','SHOP') not like '%Customer account%' or public.wa_order_command('919000000001','SHOP') not like '%Customer account%' then raise exception 'FAIL role';end if;
  if public.wa_order_command('919000000004','SHOP') not like '%QA tomatoes%' then raise exception 'FAIL shop';end if;
@@ -100,11 +100,11 @@ do $ declare r text; begin
  r:=public.wa_order_command('919000000004','BUY 1 2');
  if r not like '%Total ₹20.00%' then raise exception 'FAIL quote %',r;end if;
  perform set_config('test.wa_quote',substring(r from 'CONFIRM ([0-9a-f-]{36})'),true);
-end $;
+end $$;
 reset role;
-do $ begin if (select sum(available_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>10 then raise exception 'FAIL quote reserved stock';end if;end $;
+do $$ begin if (select sum(available_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>10 then raise exception 'FAIL quote reserved stock';end if;end $$;
 set local role service_role;
-do $ declare r text; begin
+do $$ declare r text; begin
  if public.wa_order_command('919000000005','CONFIRM '||current_setting('test.wa_quote')) not like 'Quote expired or invalid%' then raise exception 'FAIL cross account quote';end if;
  r:=public.wa_order_command('919000000004','CONFIRM '||current_setting('test.wa_quote'));
  if r not like 'Test order confirmed!%' then raise exception 'FAIL confirm %',r;end if;
@@ -112,20 +112,20 @@ do $ declare r text; begin
  if public.wa_order_command('919000000004','CONFIRM '||current_setting('test.wa_quote')) not like 'Order already placed%' then raise exception 'FAIL duplicate';end if;
  if public.wa_order_command('919000000005','TRACK '||current_setting('test.wa_order')) not like 'No matching%' then raise exception 'FAIL private tracking';end if;
  if public.wa_order_command('919000000004','TRACK') not like '%Status: confirmed%' then raise exception 'FAIL tracking';end if;
-end $;
+end $$;
 reset role;
-do $ begin
+do $$ begin
  if (select count(*) from public.orders where source='whatsapp_test')<>1 or (select total_paise from public.orders where id=current_setting('test.wa_order')::uuid)<>2000 or (select sum(available_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>8 then raise exception 'FAIL shared stock and total';end if;
-end $;
+end $$;
 set local role authenticated;
 select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000001',true);
 select public.transition_order(current_setting('test.wa_order')::uuid,'packed');
 reset role;
 set local role service_role;
-do $ begin if public.wa_order_command('919000000004','TRACK') not like '%Status: packed%' then raise exception 'FAIL manager update';end if;
+do $$ begin if public.wa_order_command('919000000004','TRACK') not like '%Status: packed%' then raise exception 'FAIL manager update';end if;
  if public.wa_order_command('919000000004','SHOP') not like '%QA tomatoes%' then raise exception 'FAIL second shop';end if;
  perform set_config('test.wa_stale',substring(public.wa_order_command('919000000004','BUY 1 8') from 'CONFIRM ([0-9a-f-]{36})'),true);
-end $;
+end $$;
 reset role;
 -- Web checkout consumes stock after quote; confirmation must fail atomically.
 set local role authenticated;
@@ -133,17 +133,17 @@ select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000005'
 select public.checkout_order(current_setting('test.fpo')::uuid,'[{"crop":"QA tomatoes","grade":"A","price_paise_per_kg":1000,"quantity_kg":1}]','Test address',gen_random_uuid());
 reset role;
 set local role service_role;
-do $ begin if public.wa_order_command('919000000004','CONFIRM '||current_setting('test.wa_stale')) not like 'Order not placed%' then raise exception 'FAIL changed stock';end if;end $;
+do $$ begin if public.wa_order_command('919000000004','CONFIRM '||current_setting('test.wa_stale')) not like 'Order not placed%' then raise exception 'FAIL changed stock';end if;end $$;
 reset role;
 update private.wa_shop set quote_expires=clock_timestamp()-interval '1 second' where user_id='a5000000-0000-4000-8000-000000000004';
 set local role service_role;
-do $ begin if public.wa_order_command('919000000004','CONFIRM '||current_setting('test.wa_stale')) not like 'Quote expired%' then raise exception 'FAIL expired quote';end if;end $;
+do $$ begin if public.wa_order_command('919000000004','CONFIRM '||current_setting('test.wa_stale')) not like 'Quote expired%' then raise exception 'FAIL expired quote';end if;end $$;
 reset role;
 set local role authenticated;
 select set_config('request.jwt.claim.sub','a5000000-0000-4000-8000-000000000004',true);
 select public.wa_unlink();
 reset role;
-do $ begin if exists(select 1 from private.wa_shop where user_id='a5000000-0000-4000-8000-000000000004') or (select count(*) from public.orders where source='whatsapp_test')<>1 or (select sum(available_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>7 then raise exception 'FAIL rollback or unlink cleanup';end if;end $;
+do $$ begin if exists(select 1 from private.wa_shop where user_id='a5000000-0000-4000-8000-000000000004') or (select count(*) from public.orders where source='whatsapp_test')<>1 or (select sum(available_kg) from public.inventory_lots where fpo_id=current_setting('test.fpo')::uuid)<>7 then raise exception 'FAIL rollback or unlink cleanup';end if;end $$;
 select 'PASS: signed-channel customer authorization, quote/confirm, stock sharing, idempotency, price, expiry, private tracking, manager updates and unlink cleanup' result;
 
 rollback;
