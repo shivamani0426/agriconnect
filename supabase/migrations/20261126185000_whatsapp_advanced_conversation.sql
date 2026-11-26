@@ -123,7 +123,7 @@ begin
   if c.user_id is null or c.list_expires<=clock_timestamp() or c.expires_at<=clock_timestamp() or n>jsonb_array_length(c.products) then return jsonb_build_object('body','Search results expired. Send SEARCH again.');end if;
   p:=c.products->(n-1);f:=(p->>'fpo_id')::uuid;
   if c.fpo_id is not null and c.fpo_id<>f then return jsonb_build_object('body','One FPO per cart. Finish this cart or CLEARCART before choosing another FPO.');end if;
-  select available_kg into live_qty from private.catalogue() q where q.fpo_id=f and q.crop=p->>'crop' and q.grade=p->>'grade' and q.price_paise_per_kg=(p->>'price_paise_per_kg')::integer;
+  select q.available_kg into live_qty from private.catalogue() q where q.fpo_id=f and q.crop=p->>'crop' and q.grade=p->>'grade' and q.price_paise_per_kg=(p->>'price_paise_per_kg')::integer;
   select coalesce(sum((v->>'quantity_kg')::numeric),0) into approved_kg from jsonb_array_elements(c.items) v where v->>'crop'=p->>'crop' and v->>'grade'=p->>'grade' and v->>'price_paise_per_kg'=p->>'price_paise_per_kg';
   if qty<0.001 then return jsonb_build_object('body','Enter a positive quantity.');end if;
   qty:=qty+approved_kg;
