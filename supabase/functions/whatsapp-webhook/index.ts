@@ -1,6 +1,7 @@
 import { createHandler, PHONE_ID } from './handler.mjs';
 import { classifyResponse, relayWithRetry } from './relay.mjs';
 import {createRelay,authorizeWorker} from './transport.mjs';
+import {createMedia} from './media.mjs';
 declare const EdgeRuntime: {waitUntil(promise:Promise<unknown>):void} | undefined;
 const env=(name:string)=>Deno.env.get(name);
 function dbHeaders(){
@@ -61,15 +62,18 @@ async function rpc(name:string,body:Record<string,unknown>){
  const data=await r.text();return data?JSON.parse(data):null;
 }
 const relay=createRelay({env,rpc,report:(event:string)=>console.info(event)});
-const relayHandler=createHandler({env,prepare:relay.prepare,statusCallback:relay.statusCallback,
- dispatch:async(phone:string,id:string)=>{
-  const task=(async()=>{
+async function defer(task:Promise<unknown>){
+ if(typeof EdgeRuntime!=='undefined')EdgeRuntime.waitUntil(task);else await task;
+}
+async function dispatch(phone:string,id:string){
+ await defer((async()=>{
    await relay.process(phone,id);
-   // Bounded catch-up for messages durably queued during an in-flight send.
    for(let i=0;i<3;i++){if(!await relay.process(phone))break;}
-  })().catch(()=>console.warn('wa_relay_worker_failed'));
-  if(typeof EdgeRuntime!=='undefined')EdgeRuntime.waitUntil(task);else await task;
- },report:(event:string)=>console.warn(event)});
+ })().catch(()=>console.warn('wa_relay_worker_failed')));
+}
+const media=createMedia({env,rpc,dbHeaders,dispatch,defer,report:(event:string)=>console.warn(event)});
+const relayHandler=createHandler({env,prepare:relay.prepare,statusCallback:relay.statusCallback,dispatch,report:(event:string)=>console.warn(event)});
+const advancedHandler=createHandler({env,prepare:({id,phone,route,command}: {id:string,phone:string,route:string,command:string})=>rpc('wa_advanced_prepare',{p_id:id,p_phone:phone,p_route:route,p_command:command}),statusCallback:relay.statusCallback,media:media.start,dispatch,report:(event:string)=>console.warn(event)});
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 Deno.serve(async req=>{
  const path=new URL(req.url).pathname;
@@ -78,8 +82,14 @@ Deno.serve(async req=>{
   if(req.method!=='POST')return json({error:'Method not allowed'},405);
   if(!await authorizeWorker(env,req.headers.get('authorization')))return json({error:'Forbidden'},403);
   if(!enabled)return json({enabled:false},503);
-  try{return json(path.endsWith('/health')?await relay.health():await relay.drain());}
+  try{
+   const advanced=env('WA_ADVANCED_ENABLED')==='true';
+   if(path.endsWith('/health'))return json({...await relay.health(),advanced_enabled:advanced,voice_configured:advanced&&media.voiceConfigured(),photo_enabled:advanced&&env('WA_PHOTO_ENABLED')==='true'});
+   const result=await relay.drain();
+   if(advanced)await defer(media.cleanup().catch(()=>console.warn('wa_media_cleanup_failed')));
+   return json(result);
+  }
   catch{return json({error:'Relay unavailable'},503);}
  }
- return enabled?relayHandler(req):legacyHandler(req);
+ return enabled?(env('WA_ADVANCED_ENABLED')==='true'?advancedHandler(req):relayHandler(req)):legacyHandler(req);
 });
