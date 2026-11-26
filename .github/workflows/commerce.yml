@@ -39,6 +39,8 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f tests/sql/fpo-alerts.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-guide.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-operations.sql
+          psql -v ON_ERROR_STOP=1 -f supabase/proposals/whatsapp-v2.sql
+          psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-v2.sql
 
       - name: Verify signed ONDC lifecycle on disposable shared commerce database
         env:

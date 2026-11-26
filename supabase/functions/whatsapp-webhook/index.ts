@@ -1,4 +1,5 @@
 import { createHandler, PHONE_ID } from './handler.mjs';
+import {createV2,classifyGraph} from './v2.mjs';
 const env=(name:string)=>Deno.env.get(name);
 function dbHeaders(){
  let secret:string|undefined;try{const keys=JSON.parse(env('SUPABASE_SECRET_KEYS')??'{}');secret=typeof keys.default==='string'?keys.default:undefined;}catch{/* use legacy key */}
@@ -7,7 +8,20 @@ function dbHeaders(){
  return {'apikey':legacy,'Authorization':'Bearer '+legacy,'Content-Type':'application/json'};
 }
 const table=()=>env('SUPABASE_URL')+'/rest/v1/whatsapp_webhook_receipts';
+const v2=createV2({
+ rpc:async(name:string,args:Record<string,unknown>)=>{
+  const r=await fetch(env('SUPABASE_URL')+'/rest/v1/rpc/'+name,{method:'POST',headers:dbHeaders(),body:JSON.stringify(args),signal:AbortSignal.timeout(8000)});
+  if(!r.ok)throw new Error('V2 RPC failed');
+  const body=await r.text();return body?JSON.parse(body):null;
+ },
+ send:async(to:string,message:Record<string,unknown>)=>{
+  const token=env('WA_ACCESS_TOKEN');if(!token)return {outcome:'failed',providerId:null,error:190};
+  const r=await fetch('https://graph.facebook.com/v25.0/'+PHONE_ID+'/messages',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to,...message}),signal:AbortSignal.timeout(8000)});
+  let body;try{body=await r.json();}catch{body=null;}return classifyGraph(r.status,body);
+ }
+});
 Deno.serve(createHandler({
+ v2,
  env,
  guide:async(phone:string,command:string,button:boolean)=>{
   const r=await fetch(env('SUPABASE_URL')+'/rest/v1/rpc/wa_guide',{method:'POST',headers:dbHeaders(),body:JSON.stringify({p_phone:phone,p_text:command,p_button:button}),signal:AbortSignal.timeout(8000)});
