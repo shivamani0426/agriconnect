@@ -10,7 +10,7 @@ export async function signature(secret,body){
  return 'sha256='+hex(await crypto.subtle.sign('HMAC',key,body));
 }
 const hash=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
-export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,now=()=>Date.now(),report=()=>{}}){
+export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,now=()=>Date.now(),report=()=>{}}){
  return async req=>{
   try{
    if(req.method==='GET'){
@@ -46,13 +46,15 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
       const greeting=['hi','hello','help','menu'].includes(command);
       const shopping=/^(shop|buy|confirm|track|reset)( |$)/.test(command);
       const farming=/^(fpos|harvest|submit|harvests|harvestreset)( |$)/.test(command);
-      if(!link&&!greeting&&!shopping&&!farming)continue;
+      const managing=/^(alerts|read)( |$)/.test(command);
+      if(!link&&!greeting&&!shopping&&!farming&&!managing)continue;
       const age=now()-Number(m.timestamp)*1000;if(!Number.isFinite(age)||age>600000||age< -60000)continue;
       const id=await hash(PHONE_ID+':'+m.id);
       if(!await claim(id))continue;
       let ok=false;try{
        let reply='Welcome to AgriConnect! 🌱 To link your account, sign in at https://agriconnect-q7c2.onrender.com/ and open Profile → WhatsApp account. Send SHOP after linking a Customer account. All orders are tests.';
        if(link){const outcome=await redeem(m.from,link[1]);reply=outcome==='linked'?'WhatsApp linked successfully! Open your AgriConnect profile and refresh linking status. Your account role has not changed.':'Link not completed. Check your number and use a fresh code from your own AgriConnect profile. If this number is already linked, unlink it from that account first.';}
+       else if(managerCommand&&(greeting||managing))reply=await managerCommand(m.from,command);
        else if(harvestCommand&&(greeting||farming))reply=await harvestCommand(m.from,original);
        else if(orderCommand&&(greeting||shopping))reply=await orderCommand(m.from,command);
        ok=await send(m.from,reply);
