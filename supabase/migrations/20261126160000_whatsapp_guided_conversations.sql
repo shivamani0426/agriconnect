@@ -27,6 +27,7 @@ begin
   if cmd !~ '^ac_(confirm|cancel):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then return jsonb_build_object('body',private.wa_phrase(l,'invalid'));end if;
   action_id:=split_part(cmd,':',2)::uuid;
   if g.step not in ('order_confirm','harvest_confirm') or g.target is distinct from action_id or g.expires_at<=clock_timestamp() then return jsonb_build_object('body',private.wa_phrase(l,'expired'));end if;
+  if (g.step='order_confirm' and not exists(select 1 from private.wa_shop where user_id=u and quote_id=action_id and quote_expires>clock_timestamp())) or (g.step='harvest_confirm' and not exists(select 1 from private.wa_harvest_drafts where user_id=u and draft_id=action_id and draft_expires>clock_timestamp())) then return jsonb_build_object('body',private.wa_phrase(l,'expired'));end if;
   if cmd like 'ac_cancel:%' then
    if r='customer' then perform private.wa_order_command(p_phone,'reset');elsif r='farmer' then perform private.wa_harvest_command(p_phone,'harvestreset');end if;
    body:=private.wa_phrase(l,'cancelled');
@@ -116,7 +117,7 @@ begin
   return jsonb_build_object('body',private.wa_phrase(l,'quantity')||private.wa_phrase(l,'hint'));
  elsif g.step in ('shop_qty','farm_qty') then
   if v !~ '^[0-9]{1,9}([.][0-9]{1,3})?$' then return jsonb_build_object('body',private.wa_phrase(l,'invalid')||E'\n'||private.wa_phrase(l,'quantity'));end if;
-  if v::numeric<0.001 or v::numeric>case when g.step='shop_qty' then 10000 else 999999999 end then return jsonb_build_object('body',private.wa_phrase(l,'invalid')||E'\n'||private.wa_phrase(l,'quantity'));end if;
+  if v::numeric<0.001 or v::numeric>(case when g.step='shop_qty' then 10000 else 999999999 end) then return jsonb_build_object('body',private.wa_phrase(l,'invalid')||E'\n'||private.wa_phrase(l,'quantity'));end if;
   if g.step='farm_qty' then
    update private.wa_guides set qty=v,step='farm_date' where user_id=u;
    return jsonb_build_object('body',private.wa_phrase(l,'date')||private.wa_phrase(l,'hint'));
