@@ -63,7 +63,11 @@ async function rpc(name:string,body:Record<string,unknown>){
 const relay=createRelay({env,rpc,report:(event:string)=>console.info(event)});
 const relayHandler=createHandler({env,prepare:relay.prepare,statusCallback:relay.statusCallback,
  dispatch:async(phone:string,id:string)=>{
-  const task=relay.process(phone,id).catch(()=>console.warn('wa_relay_worker_failed'));
+  const task=(async()=>{
+   await relay.process(phone,id);
+   // Bounded catch-up for messages durably queued during an in-flight send.
+   for(let i=0;i<3;i++){if(!await relay.process(phone))break;}
+  })().catch(()=>console.warn('wa_relay_worker_failed'));
   if(typeof EdgeRuntime!=='undefined')EdgeRuntime.waitUntil(task);else await task;
  },report:(event:string)=>console.warn(event)});
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
