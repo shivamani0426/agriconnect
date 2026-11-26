@@ -35,6 +35,7 @@ do $$ declare r jsonb; tok uuid; q text; oid uuid; m text; begin
  perform private.wa_v2_action('919000008003','CART CONFIRM '||q,'text');
  select id into oid from public.orders where request_key=q::uuid;
  if oid is null or (select total_paise from public.orders where id=oid)<>12000 or (select count(*) from public.order_allocations where order_id=oid)<>2 then raise exception 'FAIL shared checkout';end if;
+ if private.wa_v2_action('919000008003','CART CONFIRM '||q,'text')->>'body' not like '%already placed%' then raise exception 'FAIL cart retry recovery';end if;
  if private.wa_v2_action('919000008004','ORDER '||oid,'text')->>'body' not like '%No matching%' then raise exception 'FAIL order privacy';end if;
  if private.wa_v2_action('919000008003','ORDERS','text')->>'body' not like '%'||oid||'%' then raise exception 'FAIL history';end if;
  if private.wa_v2_action('919000008002','my earnings','text')->>'body' not like '%reserved estimate%' then raise exception 'FAIL earnings';end if;
@@ -44,6 +45,16 @@ do $$ declare r jsonb; tok uuid; q text; oid uuid; m text; begin
  if private.wa_v2_action('919000008002','','image')->>'body' not like '%No image was downloaded%' then raise exception 'FAIL image fallback';end if;
  if has_function_privilege('authenticated','public.wa_v2_prepare(text,text,text,text)','execute') or has_table_privilege('authenticated','private.wa_v2_outbox','select') then raise exception 'FAIL grants';end if;
  if (private.wa_v2_diagnostics()->>'accepted')::int<>1 then raise exception 'FAIL diagnostics';end if;
+ perform private.wa_v2_action('919000008004','నమస్కారం','text');
+ if (select lang from private.wa_guides where user_id='a8000000-0000-4000-8000-000000000004')<>'te' then raise exception 'FAIL initial language';end if;
+ perform private.wa_v2_action('919000008004','नमस्ते','text');
+ if (select lang from private.wa_guides where user_id='a8000000-0000-4000-8000-000000000004')<>'te' then raise exception 'FAIL language overwrite';end if;
+ if private.wa_v2_action('919000008004','quick','text')->'list'->0->>'title'<>'ఉత్పత్తులు' then raise exception 'FAIL localized menu';end if;
+ perform private.wa_v2_prepare(repeat('d',64),'919000008004','orders','text');
+ if private.wa_v2_take(repeat('d',64),'919000008003')->>'state'<>'ignored' then raise exception 'FAIL cross sender queue';end if;
+ delete from private.wa_links where user_id='a8000000-0000-4000-8000-000000000004';
+ if exists(select 1 from private.wa_v2_outbox where message_hash=repeat('d',64)) then raise exception 'FAIL unlink cleanup';end if;
+ if private.wa_v2_prepare(repeat('d',64),'919000008004','orders','text')<>'duplicate' then raise exception 'FAIL unlink receipt tombstone';end if;
 end $$;
 rollback;
 select 'PASS: V2 atomic operation/reply, retry, status monotonicity, natural harvest preview, cart checkout, privacy, role reports, media fallback, service grants' result;
