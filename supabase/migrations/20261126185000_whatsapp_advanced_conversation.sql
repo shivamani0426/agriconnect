@@ -30,7 +30,7 @@ $$;
 alter function private.wa_guide(text,text,boolean) rename to wa_guide_round01;
 revoke all on function private.wa_guide_round01(text,text,boolean) from public,anon,authenticated,service_role;
 create function private.wa_guide(p_phone text,p_text text,p_button boolean default false) returns jsonb language plpgsql security definer set search_path='' as $$
-declare u uuid; r text; g private.wa_guides%rowtype; c private.wa_advanced_cart%rowtype; cmd text; raw text:=trim(p_text); reply text; lang text; n integer; qty numeric; live_qty numeric; p jsonb; item jsonb; products jsonb; items jsonb; f uuid; token uuid; oid uuid; o public.orders%rowtype; total bigint; page integer; term text; rows_text text; received bigint; pending bigint; approved_kg numeric; available_kg numeric; reserved_kg numeric; num_h bigint; pending_h bigint; num_f bigint; num_o bigint; x text[];
+declare u uuid; r text; g private.wa_guides%rowtype; c private.wa_advanced_cart%rowtype; cmd text; raw text:=trim(p_text); reply text; lang text; n integer; qty numeric; live_qty numeric; p jsonb; item jsonb; v_products jsonb; v_items jsonb; f uuid; token uuid; oid uuid; o public.orders%rowtype; total bigint; page integer; term text; rows_text text; received bigint; pending bigint; approved_kg numeric; available_kg numeric; reserved_kg numeric; num_h bigint; pending_h bigint; num_f bigint; num_o bigint; x text[];
 begin
  if p_phone is null or p_phone !~ '^[1-9][0-9]{6,14}$' or raw is null or length(raw) not between 1 and 512 then return private.wa_guide_round01(p_phone,p_text,p_button);end if;
  select w.user_id into u from private.wa_links w where w.phone=p_phone;
@@ -72,9 +72,14 @@ begin
   end if;
   return private.wa_guide_round01(p_phone,p_text,true);
  end if;
+ -- Cancel old cart quotes on any later non-button interaction except explicitly reviewing the cart.
+ if cmd not in ('cart','checkout') then update private.wa_advanced_cart set quote_id=null,quote_expires=null where user_id=u;end if;
  -- Preserve active guided input: only explicit slash commands interrupt an unfinished step.
  if g.step is not null and g.step not in ('menu','language') and g.expires_at>clock_timestamp() and raw not like '/%' then return private.wa_guide_round01(p_phone,p_text,false);end if;
- if raw like '/%' then cmd:=lower(trim(substring(raw from 2)));end if;
+ if raw like '/%' then
+  cmd:=lower(trim(substring(raw from 2)));
+  if g.step not in ('menu','language') then perform private.wa_guide_round01(p_phone,'0',false);end if;
+ end if;
  if cmd in ('0','hi','hello','help','menu','language','3 languages') then
   update private.wa_advanced_cart set quote_id=null,quote_expires=null where user_id=u;
   return private.wa_guide_round01(p_phone,cmd,false);
@@ -105,10 +110,10 @@ begin
   return jsonb_build_object('body','Your FPO report — page '||page||E'\n'||coalesce(rows_text,'No managed FPO on this page.')||E'\nTest data only. REPORT '||(page+1)||' for more; 0 for operations.');
  elsif r='customer' and (cmd='search' or cmd like 'search %') then
   term:=trim(substring(cmd from 7));if length(term)>100 then return jsonb_build_object('body','Search term must be at most 100 characters.');end if;
-  select coalesce(jsonb_agg(to_jsonb(z) order by z.fpo_name,z.crop,z.grade,z.price_paise_per_kg,z.fpo_id),'[]') into products from (select * from private.catalogue() q where term='' or strpos(lower(q.crop),term)>0 order by fpo_name,crop,grade,price_paise_per_kg,fpo_id limit 8) z;
-  insert into private.wa_advanced_cart(user_id,products,list_expires) values(u,products,clock_timestamp()+interval '10 minutes')
+  select coalesce(jsonb_agg(to_jsonb(z) order by z.fpo_name,z.crop,z.grade,z.price_paise_per_kg,z.fpo_id),'[]') into v_products from (select * from private.catalogue() q where term='' or strpos(lower(q.crop),term)>0 order by fpo_name,crop,grade,price_paise_per_kg,fpo_id limit 8) z;
+  insert into private.wa_advanced_cart(user_id,products,list_expires) values(u,v_products,clock_timestamp()+interval '10 minutes')
   on conflict(user_id) do update set products=excluded.products,list_expires=excluded.list_expires,items=case when wa_advanced_cart.expires_at>clock_timestamp() then wa_advanced_cart.items else '[]'::jsonb end,fpo_id=case when wa_advanced_cart.expires_at>clock_timestamp() then wa_advanced_cart.fpo_id end,expires_at=clock_timestamp()+interval '30 minutes',quote_id=null,quote_expires=null;
-  select string_agg(ord||'. '||private.wa_clean(v->>'crop',100)||' | '||(v->>'grade')||' | '||private.wa_clean(v->>'fpo_name',100)||' | '||private.wa_money((v->>'price_paise_per_kg')::bigint)||'/kg | '||(v->>'available_kg')||' kg',E'\n' order by ord) into rows_text from jsonb_array_elements(products) with ordinality e(v,ord);
+  select string_agg(ord||'. '||private.wa_clean(v->>'crop',100)||' | '||(v->>'grade')||' | '||private.wa_clean(v->>'fpo_name',100)||' | '||private.wa_money((v->>'price_paise_per_kg')::bigint)||'/kg | '||(v->>'available_kg')||' kg',E'\n' order by ord) into rows_text from jsonb_array_elements(v_products) with ordinality e(v,ord);
   return jsonb_build_object('body','Search results'||E'\n'||coalesce(rows_text,'No matching produce. Try another crop.')||E'\nADD 1 2 adds item 1, 2 kg. CART to review. Results expire in 10 minutes.');
  elsif r='customer' and cmd ~ '^add [1-8] [0-9]{1,5}(\.[0-9]{1,3})?$' then
   x:=regexp_match(cmd,'^add ([1-8]) ([0-9]{1,5}(\.[0-9]{1,3})?)$');n:=x[1]::integer;qty:=x[2]::numeric;
@@ -117,18 +122,19 @@ begin
   if c.fpo_id is not null and c.fpo_id<>f then return jsonb_build_object('body','One FPO per cart. Finish this cart or CLEARCART before choosing another FPO.');end if;
   select available_kg into live_qty from private.catalogue() q where q.fpo_id=f and q.crop=p->>'crop' and q.grade=p->>'grade' and q.price_paise_per_kg=(p->>'price_paise_per_kg')::integer;
   select coalesce(sum((v->>'quantity_kg')::numeric),0) into approved_kg from jsonb_array_elements(c.items) v where v->>'crop'=p->>'crop' and v->>'grade'=p->>'grade' and v->>'price_paise_per_kg'=p->>'price_paise_per_kg';
+  if qty<0.001 then return jsonb_build_object('body','Enter a positive quantity.');end if;
   qty:=qty+approved_kg;
   if qty<0.001 or qty>10000 or live_qty is null or qty>live_qty or round(qty*(p->>'price_paise_per_kg')::numeric)<1 then return jsonb_build_object('body','Quantity or stock unavailable. Search again and choose a valid quantity.');end if;
-  select coalesce(jsonb_agg(v order by ord),'[]') into items from jsonb_array_elements(c.items) with ordinality e(v,ord) where not(v->>'crop'=p->>'crop' and v->>'grade'=p->>'grade' and v->>'price_paise_per_kg'=p->>'price_paise_per_kg');
-  if jsonb_array_length(items)>=10 then return jsonb_build_object('body','Cart limit: 10 distinct products.');end if;
+  select coalesce(jsonb_agg(v order by ord),'[]') into v_items from jsonb_array_elements(c.items) with ordinality e(v,ord) where not(v->>'crop'=p->>'crop' and v->>'grade'=p->>'grade' and v->>'price_paise_per_kg'=p->>'price_paise_per_kg');
+  if jsonb_array_length(v_items)>=10 then return jsonb_build_object('body','Cart limit: 10 distinct products.');end if;
   item:=jsonb_build_object('crop',p->>'crop','grade',p->>'grade','price_paise_per_kg',(p->>'price_paise_per_kg')::integer,'quantity_kg',qty);
-  update private.wa_advanced_cart set items=items||jsonb_build_array(item),fpo_id=f,quote_id=null,quote_expires=null,expires_at=clock_timestamp()+interval '30 minutes' where user_id=u;
+  update private.wa_advanced_cart set items=v_items||jsonb_build_array(item),fpo_id=f,quote_id=null,quote_expires=null,expires_at=clock_timestamp()+interval '30 minutes' where user_id=u;
   return jsonb_build_object('body','Added to cart. Send CART or continue SEARCH/ADD. No stock reserved yet.');
  elsif r='customer' and cmd ~ '^remove [1-9][0-9]?$' then
   n:=split_part(cmd,' ',2)::integer;
   if c.user_id is null or c.expires_at<=clock_timestamp() or n>jsonb_array_length(c.items) then return jsonb_build_object('body','No matching cart item. Send CART.');end if;
-  items:=c.items-(n-1);
-  update private.wa_advanced_cart set items=items,fpo_id=case when jsonb_array_length(items)=0 then null else c.fpo_id end,quote_id=null,quote_expires=null where user_id=u;
+  v_items:=c.items-(n-1);
+  update private.wa_advanced_cart set items=v_items,fpo_id=case when jsonb_array_length(v_items)=0 then null else c.fpo_id end,quote_id=null,quote_expires=null where user_id=u;
   return jsonb_build_object('body','Item removed. Send CART.');
  elsif r='customer' and cmd='clearcart' then
   delete from private.wa_advanced_cart where user_id=u;return jsonb_build_object('body','Cart cleared. Existing orders are unchanged.');
@@ -138,9 +144,9 @@ begin
   if cmd='cart' then return jsonb_build_object('body','Your test cart'||E'\n'||rows_text||E'\nEstimated total: '||private.wa_money(total)||E'\nREMOVE 1, CHECKOUT or CLEARCART.');end if;
   if exists(select 1 from jsonb_array_elements(c.items) v where not exists(select 1 from private.catalogue() q where q.fpo_id=c.fpo_id and q.crop=v->>'crop' and q.grade=v->>'grade' and q.price_paise_per_kg=(v->>'price_paise_per_kg')::integer and q.available_kg>=(v->>'quantity_kg')::numeric)) then return jsonb_build_object('body','Stock or price changed. Review cart before checkout.');end if;
   token:=gen_random_uuid();
-  update private.wa_advanced_cart set quote_id=token,quote_expires=least(expires_at,clock_timestamp()+interval '5 minutes') where user_id=u;
   reply:='Confirm test checkout'||E'\n'||rows_text||E'\nTotal: '||private.wa_money(total)||E'\nNo real payment or delivery. Confirm exact cart.';
   if length(reply)>1024 then return jsonb_build_object('body','Cart preview is too long for a confirmation. Remove an item and retry.');end if;
+  update private.wa_advanced_cart set quote_id=token,quote_expires=least(expires_at,clock_timestamp()+interval '5 minutes') where user_id=u;
   return jsonb_build_object('body',reply,'buttons',jsonb_build_array(jsonb_build_object('id','ac_confirm:'||token,'title',private.wa_phrase(lang,'confirm')),jsonb_build_object('id','ac_cancel:'||token,'title',private.wa_phrase(lang,'cancel'))));
  elsif r='customer' and cmd ~ '^history( [1-9][0-9]{0,2})?$' then
   page:=coalesce(nullif(split_part(cmd,' ',2),''),'1')::integer;
