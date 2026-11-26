@@ -41,6 +41,8 @@ begin
  lang:=coalesce(g.lang,'en');
  raw:=translate(raw,'೦೧೨೩೪೫೬೭೮೯౦౧౨౩౪౫౬౭౮౯०१२३४५६७८९','012345678901234567890123456789');
  cmd:=lower(raw);
+ if not p_button and cmd='/photohelp' then return jsonb_build_object('body','Submit a harvest first. Send a JPEG, PNG or WebP image (up to 5 MB) with caption PHOTO <your pending harvest reference>. Only your own pending harvest without a photo can be updated.');end if;
+ if not p_button and cmd='/voicehelp' then return jsonb_build_object('body','Voice transcription requires an administrator-configured service and /VOICE ON consent. Short Ogg voice notes only. If unavailable, type your command.');end if;
  -- Detect script only on an initial greeting, never silently override an explicit language choice.
  if not p_button and g.lang is null and cmd in ('ನಮಸ್ಕಾರ','ನಮಸ್ತೆ','నమస్కారం','నమస్తే','नमस्ते','नमस्कार') then
   perform private.wa_guide_round01(p_phone,'HI',false);
