@@ -1,4 +1,5 @@
 import { createHandler, PHONE_ID } from './handler.mjs';
+import { classifyResponse, relayWithRetry } from './relay.mjs';
 const env=(name:string)=>Deno.env.get(name);
 function dbHeaders(){
  let secret:string|undefined;try{const keys=JSON.parse(env('SUPABASE_SECRET_KEYS')??'{}');secret=typeof keys.default==='string'?keys.default:undefined;}catch{/* use legacy key */}
@@ -43,8 +44,11 @@ Deno.serve(createHandler({
   const buttons=typeof reply==='string'?undefined:reply.buttons;
   if(buttons&&(!Array.isArray(buttons)||buttons.length<1||buttons.length>3||body.length>1024||buttons.some(b=>!/^ac_(confirm|cancel):[0-9a-f-]{36}$/.test(b.id)||b.title.length>20)))throw new Error('Invalid interactive response');
   const message=buttons?{type:'interactive',interactive:{type:'button',body:{text:body},action:{buttons:buttons.map(b=>({type:'reply',reply:b}))}}}:{type:'text',text:{preview_url:false,body}};
+  const result=await relayWithRetry(async()=>{
   const r=await fetch('https://graph.facebook.com/v25.0/'+PHONE_ID+'/messages',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to,...message}),signal:AbortSignal.timeout(8000)});
-  if(!r.ok){let code:number|undefined;let subcode:number|undefined;try{const e=(await r.json()).error;if(Number.isInteger(e?.code))code=e.code;if(Number.isInteger(e?.error_subcode))subcode=e.error_subcode;}catch{/* never log raw provider response */}console.warn('WhatsApp Graph reply rejected',r.status,'code',code??'unknown','subcode',subcode??'unknown');return false;}return true;
+  if(!r.ok){let code:number|undefined;let subcode:number|undefined;try{const e=(await r.json()).error;if(Number.isInteger(e?.code))code=e.code;if(Number.isInteger(e?.error_subcode))subcode=e.error_subcode;}catch{/* never log raw provider response */}console.warn('WhatsApp Graph reply rejected',r.status,'code',code??'unknown','subcode',subcode??'unknown');return {state:classifyResponse(r.status,code)};}return {state:'accepted'};
+  },{report:event=>console.warn(event)});
+  return result?.state==='accepted';
  },
  report:(event:string)=>console.warn(event)
 }));
