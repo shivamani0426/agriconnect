@@ -108,7 +108,10 @@ begin
  elsif r='customer' and (cmd='cart' or cmd='clear cart' or cmd='checkout cart' or cmd ~ '^add ' or cmd ~ '^cart confirm ') then
   select * into cart from private.wa_v2_cart where user_id=u;
   if cmd='clear cart' then delete from private.wa_v2_cart where user_id=u;return private.wa_v2_text('Cart cleared. Existing orders are unchanged.');end if;
-  if cmd ~ '^cart confirm [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12} is null or cart.quote_id::text<>split_part(cmd,' ',3) or cart.expires_at<=clock_timestamp() then return private.wa_v2_text('Cart quote expired or invalid. Send CHECKOUT CART again.');end if;
+  if cmd ~ '^cart confirm [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then
+   select id into oid from public.orders where customer_id=u and request_key=split_part(cmd,' ',3)::uuid and source='whatsapp_test';
+   if found then return private.wa_v2_text('Test order already placed: '||oid||'. No duplicate order created. Send ORDERS.');end if;
+   if cart.quote_id is null or cart.quote_id::text<>split_part(cmd,' ',3) or cart.expires_at<=clock_timestamp() then return private.wa_v2_text('Cart quote expired or invalid. Send CHECKOUT CART again.');end if;
    begin
     oid:=private.checkout_order_for(u,cart.fpo_id,cart.items,'WhatsApp test delivery - no real delivery',cart.quote_id);
     update public.orders set source='whatsapp_test' where id=oid and customer_id=u and source='web';
