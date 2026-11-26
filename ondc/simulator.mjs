@@ -14,16 +14,18 @@ export function createLocalSimulator({registry,signer,readCatalogue,eligibility,
    const {context,filters}=parseSearch(raw,now,sender);
    for(const [k,r] of receipts)if(r.until<=now)receipts.delete(k);
    const k=JSON.stringify([sender.subscriber,context.message_id]),hash=createHash('sha256').update(raw).digest('hex'),existing=receipts.get(k);
-   if(existing){if(existing.hash!==hash)return {status:409,ack:nack('LOCAL_REPLAY','Message ID reused for different content')};return {status:200,ack:ack(),duplicate:true};}
+   if(existing){if(existing.hash!==hash)return {status:409,ack:nack('LOCAL_REPLAY','Message ID reused for different content')};if(!existing.complete)return {status:503,ack:nack('LOCAL_PENDING','Message is already processing; retry later')};return {status:200,ack:ack(),duplicate:true};}
    if(receipts.size>=maxReceipts)return {status:503,ack:nack('LOCAL_CAPACITY','Local receipt capacity reached')};
    // Claim before await to prevent parallel duplicate callbacks. On read failure, release for safe retry.
-   receipts.set(k,{hash,until:now+360000});
+   receipts.set(k,{hash,until:now+360000,complete:false});
    try{
     const catalog=projectCatalogue(await readCatalogue(),eligibility,filters);
     const callback=Buffer.from(JSON.stringify({context:callbackContext(context,now),message:{catalog}}));
     if(callback.length>MAX_BODY)throw new ProtocolError('LOCAL_SIZE','Catalogue exceeds local limit');
     const created=Math.floor(now/1000);
-    return {status:200,ack:ack(),callback:{path:'/on_search',raw:callback,header:authorization(callback,signer.keyId,signer.privateKey,created,created+30)}};
+    const header=authorization(callback,signer.keyId,signer.privateKey,created,created+30);
+    receipts.get(k).complete=true;
+    return {status:200,ack:ack(),callback:{path:'/on_search',raw:callback,header}};
    }catch(e){receipts.delete(k);throw e;}
   }catch(e){const code=e instanceof ProtocolError?e.code:'LOCAL_FAILURE';return {status:code==='LOCAL_AUTH'?401:code==='LOCAL_FAILURE'||code==='LOCAL_CATALOGUE'?503:400,ack:nack(code,code==='LOCAL_FAILURE'?'Local simulation failed':e.message)};}
  };

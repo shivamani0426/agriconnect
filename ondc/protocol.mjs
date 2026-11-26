@@ -20,6 +20,7 @@ export function parseSearch(raw,now,sender){
  if(!id(c.transaction_id)||!id(c.message_id))fail('LOCAL_CONTEXT','Invalid transaction or message ID');
  if(typeof c.timestamp!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/.test(c.timestamp)||!Number.isFinite(Date.parse(c.timestamp)))fail('LOCAL_CONTEXT','Invalid timestamp');
  const ttl=/^PT([1-9][0-9]{0,2})S$/.exec(c.ttl??'');const stamp=Date.parse(c.timestamp);
+ if(new Date(stamp).toISOString()!==c.timestamp.replace(/Z$/,c.timestamp.includes('.')?'Z':'.000Z'))fail('LOCAL_CONTEXT','Invalid calendar timestamp');
  if(!ttl||Number(ttl[1])>300||stamp>now+30000||stamp+Number(ttl[1])*1000<=now)fail('LOCAL_EXPIRED','Invalid or expired request');
  fields(x.message,['intent']);const intent=x.message.intent;
  // Deliberately reject unknown filters rather than silently broadening search.
