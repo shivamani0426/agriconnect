@@ -13,7 +13,7 @@ create table private.wa_voice_permission(
 alter table private.wa_advanced_cart enable row level security;
 alter table private.wa_voice_permission enable row level security;
 revoke all on private.wa_advanced_cart,private.wa_voice_permission from public,anon,authenticated,service_role;
-create function private.wa_money(v bigint) returns text language sql immutable set search_path='' as $$ select '₹'||round(coalesce(v,0)::numeric/100,2)::text $$;
+create function private.wa_money(v numeric) returns text language sql immutable set search_path='' as $$ select '₹'||round(coalesce(v,0)::numeric/100,2)::text $$;
 create function private.wa_clean(v text,n integer) returns text language sql immutable set search_path='' as $$ select left(regexp_replace(coalesce(v,''),'[[:cntrl:]]',' ','g'),n) $$;
 -- Only high-confidence, non-mutating language aliases. Never interpret free-form harvest names,
 -- quantities, reasons or opaque confirmation codes as actions.
@@ -164,7 +164,7 @@ begin
  return private.wa_guide_round01(p_phone,p_text,p_button);
 end $$;
 create or replace function public.wa_guide(p_phone text,p_text text,p_button boolean) returns jsonb language sql security invoker set search_path='' as $$select private.wa_guide(p_phone,p_text,p_button)$$;
-revoke all on function private.wa_money(bigint),private.wa_clean(text,integer),private.wa_intent(text,text),private.wa_guide(text,text,boolean),public.wa_guide(text,text,boolean) from public,anon,authenticated,service_role;
+revoke all on function private.wa_money(numeric),private.wa_clean(text,integer),private.wa_intent(text,text),private.wa_guide(text,text,boolean),public.wa_guide(text,text,boolean) from public,anon,authenticated,service_role;
 grant execute on function private.wa_guide(text,text,boolean),public.wa_guide(text,text,boolean) to service_role;
 -- Opt-in per transaction: migration alone does not switch the live guide.
 create function private.wa_advanced_prepare(p_id text,p_phone text,p_route text,p_command text) returns boolean language plpgsql security definer set search_path='' as $$
