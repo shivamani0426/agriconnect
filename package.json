@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "ondc:demo": "node ondc/demo.mjs",
+    "ondc:test": "node --test tests/ondc-local.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.57.4",
