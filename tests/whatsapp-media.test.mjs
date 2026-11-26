@@ -25,7 +25,7 @@ test('download validates media identity, MIME, bytes, length and hash',async()=>
 test('media claim denied before any provider or storage request',async()=>{
  const calls=[];const media=createMedia({env:k=>baseEnv[k],rpc:async(n,p)=>{calls.push([n,p]);return {state:'denied'};},dbHeaders:()=>({}),dispatch:async()=>{},defer:async t=>t,fetcher:async()=>assert.fail('external access')});
  await media.start({id,phone,kind:'image',media:photo});
- assert.deepEqual(calls.map(x=>x[0]),['wa_media_claim','wa_relay_prepare']);
+ assert.deepEqual(calls.map(x=>x[0]),['wa_media_claim','wa_advanced_prepare']);
  assert.equal(calls[0][1].p_target,uuid);
 });
 test('photo is uploaded only to reserved private path and finished once',async()=>{
@@ -40,7 +40,7 @@ test('voice is preview-only; configured service receives audio only, never sende
  const media=createMedia({env:k=>baseEnv[k],rpc:async(n,p)=>{calls.push([n,p]);return n==='wa_media_claim'?{state:'claimed',path:null}:true;},dbHeaders:()=>({}),dispatch:async()=>{},defer:async t=>t,fetcher:async(url,opts)=>{if(url.startsWith('https://graph.facebook.com/'))return Response.json(data);if(url===metaUrl)return new Response(oggBytes,{headers:{'content-type':'audio/ogg'}});assert.equal(url,baseEnv.WA_VOICE_ENDPOINT);assert.equal(opts.headers.Authorization,'Bearer fake-voice');assert.deepEqual(opts.body,oggBytes);return Response.json({text:'CONFIRM order'});}});
  await media.start({id,phone,kind:'audio',media:{id:photo.id,mime_type:'audio/ogg; codecs=opus'}});
  assert.equal(calls.find(x=>x[0]==='wa_media_finish')[1].p_transcript,'CONFIRM order');
- assert.ok(!calls.some(x=>x[0]==='wa_relay_prepare'));
+ assert.ok(!calls.some(x=>x[0]==='wa_advanced_prepare'));
 });
 test('disabled voice and unallowlisted media never fetch data',async()=>{
  const calls=[];const media=createMedia({env:k=>k==='WA_VOICE_ENABLED'?'false':baseEnv[k],rpc:async(n,p)=>{calls.push([n,p]);return true;},dbHeaders:()=>({}),dispatch:async()=>{},defer:async t=>t,fetcher:async()=>assert.fail('external access')});
