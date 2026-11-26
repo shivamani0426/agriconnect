@@ -10,7 +10,7 @@ export async function signature(secret,body){
  return 'sha256='+hex(await crypto.subtle.sign('HMAC',key,body));
 }
 const hash=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
-export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,guide,now=()=>Date.now(),report=()=>{}}){
+export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,guide,v2,now=()=>Date.now(),report=()=>{}}){
  return async req=>{
   try{
    if(req.method==='GET'){
@@ -33,12 +33,28 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
    if(env('WA_TEST_REPLIES_ENABLED')!=='true')return response('OK');
    const allowed=new Set((env('WA_TEST_RECIPIENTS')??'').split(',').map(n=>n.trim()).filter(n=>/^\d{7,15}$/.test(n)));
    if(!allowed.size||!env('WA_ACCESS_TOKEN'))return response('Not configured',503);
+   let retry=false;
+   const modern=env('WA_V2_ENABLED')==='true'&&v2;
    for(const entry of event.entry){
     if(entry?.id!==WABA_ID||!Array.isArray(entry.changes))continue;
     for(const change of entry.changes){
-     const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID||!Array.isArray(v.messages))continue;
+     const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID )continue;
+     if(modern&&Array.isArray(v.statuses)){for(const s of v.statuses){if(allowed.has(s?.recipient_id))await modern.delivery(s.id,s.recipient_id,s.status);}}
+     if(!Array.isArray(v.messages))continue;
      for(const m of v.messages){
       if(typeof m?.id!=='string'||!m.id.startsWith('wamid.')||m.id.length>512||!allowed.has(m.from) )continue;
+      if(modern){
+       const age=now()-Number(m.timestamp)*1000;if(!Number.isFinite(age)||age>600000||age< -60000)continue;
+       let mode,txt;
+       if(m.type==='text'&&typeof m.text?.body==='string'){mode='text';txt=m.text.body.trim();const match=/^link ([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i.exec(txt);if(match){mode='link';txt=match[1].toLowerCase();}}
+       else if(m.type==='interactive'&&m.interactive?.type==='button_reply'&&/^ac_(confirm|cancel):[0-9a-f-]{36}$/.test(m.interactive?.button_reply?.id??'')){mode='button';txt=m.interactive.button_reply.id;}
+       else if(m.type==='interactive'&&m.interactive?.type==='list_reply'&&/^ac_nav:[0-9a-f-]{36}:[1-6]$/.test(m.interactive?.list_reply?.id??'')){mode='list';txt=m.interactive.list_reply.id;}
+       else if(['audio','image'].includes(m.type)){mode=m.type;txt='';}
+       else continue;
+       if(txt.length>512)continue;
+       const result=await modern.process({id:await hash(PHONE_ID+':'+m.id),phone:m.from,text:txt,mode});if(result==='retry')retry=true;
+       continue;
+      }
       const button=m.type==='interactive'&&m.interactive?.type==='button_reply'&&typeof m.interactive?.button_reply?.id==='string';
       if(!button&&(m.type!=='text'||typeof m.text?.body!=='string'))continue;
       if(button&&!guide)continue;
@@ -69,7 +85,7 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
      }
     }
    }
-   return response('OK');
+   return retry?response('Retry later',503):response('OK');
   }catch{report('webhook_failed');return response('Temporary failure',503);}
  };
 }
