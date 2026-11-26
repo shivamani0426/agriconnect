@@ -1,0 +1,2 @@
+# Pipeline 03C
+Profile → WhatsApp account: enter your own approved test number, consent, generate UUID code, send LINK code from that number, refresh status. Code expires after 10 minutes; only hash stored; one active code/account; one phone/account and one account/phone. Unlink or cancel from profile. Existing allowlist, signed webhook, kill switch and test number remain in effect. No ordering or account role change. Temporary Meta token may expire. No production phone or billing.
