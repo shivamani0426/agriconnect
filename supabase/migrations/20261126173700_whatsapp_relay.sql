@@ -36,13 +36,14 @@ create function private.wa_relay_rank(v text) returns integer language sql immut
  select case v when 'read' then 4 when 'delivered' then 3 when 'failed' then 2 when 'sent' then 1 else 0 end
 $$;
 create function private.wa_relay_prepare(p_id text,p_phone text,p_route text,p_command text) returns boolean language plpgsql security definer set search_path='' as $$
-declare u uuid; linked timestamptz; role_name text; reply jsonb; g private.wa_guides%rowtype; menu private.wa_relay_menu%rowtype; token uuid; choice integer; options jsonb; n integer; cmd text:=trim(p_command);
+declare u uuid; linked timestamptz; role_name text; original_user uuid; original_link timestamptz; original_role text; reply jsonb; g private.wa_guides%rowtype; menu private.wa_relay_menu%rowtype; token uuid; choice integer; options jsonb; n integer; cmd text:=trim(p_command);
 begin
  if p_id is null or p_id !~ '^[a-f0-9]{64}$' or p_phone is null or p_phone !~ '^[1-9][0-9]{6,14}$' or cmd is null or length(cmd)>512 or p_route is null or p_route not in ('link','guide','order','harvest','manager','button','list') then raise exception 'Invalid relay input';end if;
  perform pg_advisory_xact_lock(hashtextextended(p_phone,0));
  insert into public.whatsapp_webhook_receipts(message_hash) values(p_id) on conflict do nothing;
  if not found then return false;end if;
  select w.user_id,w.linked_at,p.account_role into u,linked,role_name from private.wa_links w join public.profiles p on p.id=w.user_id where w.phone=p_phone;
+ original_user:=u;original_link:=linked;original_role:=role_name;
  if u is not null then select * into menu from private.wa_relay_menu where user_id=u; delete from private.wa_relay_menu where user_id=u;end if;
  if p_route='link' then
   if cmd !~* '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' then raise exception 'Invalid link code';end if;
@@ -59,6 +60,9 @@ begin
  else reply:=jsonb_build_object('body',private.wa_manager_command(p_phone,lower(cmd)));end if;
  -- Bind recoverable payloads to the link instance, not just the telephone number.
  select w.user_id,w.linked_at,p.account_role into u,linked,role_name from private.wa_links w join public.profiles p on p.id=w.user_id where w.phone=p_phone;
+ if p_route<>'link' and (u is distinct from original_user or linked is distinct from original_link or role_name is distinct from original_role) then
+  reply:=jsonb_build_object('body','Account link changed. Send HI to start again.');
+ end if;
  if u is not null and not (reply ? 'buttons') then
   select * into g from private.wa_guides where user_id=u;
   if g.step='language' and reply->>'body'=private.wa_phrase(coalesce(g.lang,'en'),'choose') then n:=4;
@@ -93,6 +97,8 @@ begin
  -- Later interactions supersede older failed interactive prompts; do not resurrect them.
  update private.wa_relay_outbox a set state='expired',phone=null,reply=null,link_user=null,link_at=null,link_role=null
  where a.phone_hash=ph and a.state='retry' and (a.reply ? 'buttons' or a.reply ? 'list') and exists(select 1 from private.wa_relay_outbox b where b.phone_hash=ph and b.created_at>a.created_at);
+ -- One active send per recipient. Concurrent callbacks cannot take a second reply while the first is in flight.
+ if exists(select 1 from private.wa_relay_outbox where phone_hash=ph and state='sending') then return null;end if;
  select * into q from private.wa_relay_outbox
  where phone_hash=ph and (p_id is null or message_hash=p_id) and state in ('queued','retry') and attempts<3 and expires_at>clock_timestamp() and due_at<=clock_timestamp()
  order by created_at,message_hash limit 1 for update skip locked;
@@ -135,6 +141,11 @@ declare result jsonb;
 begin
  update private.wa_relay_outbox set state=case when state='sending' then 'unknown' else 'expired' end,phone=null,reply=null,link_user=null,link_at=null,link_role=null
  where (state in ('queued','retry') and expires_at<=clock_timestamp()) or (state='sending' and taken_at<clock_timestamp()-interval '60 seconds');
+ -- Reconcile a delivery callback that committed concurrently with the HTTP acceptance.
+ update private.wa_relay_outbox a set delivery=e.delivery from private.wa_relay_events e
+ where a.provider_hash=e.provider_hash and a.phone_hash=e.phone_hash and private.wa_relay_rank(e.delivery)>private.wa_relay_rank(a.delivery);
+ update public.whatsapp_webhook_receipts r set status='failed' from private.wa_relay_outbox q
+ where r.message_hash=q.message_hash and r.status='claimed' and q.state in ('unknown','expired','rejected','credentials');
  delete from private.wa_relay_events where updated_at<clock_timestamp()-interval '7 days';
  delete from private.wa_relay_outbox where created_at<clock_timestamp()-interval '7 days';
  delete from private.wa_relay_menu where expires_at<=clock_timestamp();
