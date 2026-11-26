@@ -32,6 +32,19 @@ begin
  insert into private.wa_media_jobs(message_hash,phone_hash,link_user,link_at,kind,target,path) values(p_id,encode(sha256(convert_to(p_phone,'UTF8')),'hex'),u,linked,p_kind,p_target,object_path);
  return jsonb_build_object('state','claimed','path',object_path);
 end $$;
+-- Recheck link, ownership and consent immediately before fetching/forwarding bytes.
+create function private.wa_media_permitted(p_id text,p_phone text) returns boolean language sql stable security definer set search_path='' as $$
+ select exists(
+  select 1 from private.wa_media_jobs j join private.wa_links w on w.user_id=j.link_user and w.linked_at=j.link_at
+   join public.profiles p on p.id=w.user_id
+  where j.message_hash=p_id and w.phone=p_phone and j.state='processing' and j.expires_at>clock_timestamp()
+  and ((j.kind='audio' and exists(select 1 from private.wa_voice_permission v where v.user_id=w.user_id and v.expires_at>clock_timestamp()))
+   or (j.kind='image' and p.account_role='farmer' and exists(select 1 from public.harvests h join public.memberships m on m.fpo_id=h.fpo_id and m.user_id=w.user_id and m.role='farmer' and m.status='active' where h.id=j.target and h.farmer_id=w.user_id and h.status='pending' and h.photo_path is null)))
+ )
+$$;
+create function public.wa_media_permitted(p_id text,p_phone text) returns boolean language sql security invoker set search_path='' as $$select private.wa_media_permitted(p_id,p_phone)$$;
+revoke all on function private.wa_media_permitted(text,text),public.wa_media_permitted(text,text) from public,anon,authenticated,service_role;
+grant execute on function private.wa_media_permitted(text,text),public.wa_media_permitted(text,text) to service_role;
 create function private.wa_media_finish(p_id text,p_phone text,p_ok boolean,p_transcript text default null) returns boolean language plpgsql security definer set search_path='' as $$
 declare j private.wa_media_jobs%rowtype; u uuid; linked timestamptz; r text; body text; final_state text:='failed'; f uuid;
 begin
