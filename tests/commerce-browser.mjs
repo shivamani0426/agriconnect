@@ -19,12 +19,18 @@ try{
  const access_token=[Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url'),Buffer.from(JSON.stringify({sub:id,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url'),'mock-signature'].join('.');
  const mockSession={...session,user:u,access_token};
  let storedRole=role;
+ let waStatus={status:'unlinked'};
+ const waCode='12345678-1234-4123-8123-123456789abc';
+ page.simulateWhatsAppLink=()=>{assert.equal(waStatus.status,'pending');waStatus={status:'linked',last4:'0001'};};
  await page.addInitScript(({mockSession,requested})=>{localStorage.setItem('sb-commerce-test-auth-token',JSON.stringify(mockSession));sessionStorage.setItem('agriconnect.oauth.workspace',requested)},{mockSession,requested});
  await page.route(host+'/**',async route=>{
   const req=route.request(),url=new URL(req.url()),path=url.pathname;
   const send=(body,status=200)=>route.fulfill({status,contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-allow-methods':'GET,POST,OPTIONS'},body:JSON.stringify(body)});
   if(req.method()==='OPTIONS')return send({});
   if(path==='/auth/v1/user')return send(u);
+  if(path.endsWith('/rpc/wa_status'))return send(waStatus);
+  if(path.endsWith('/rpc/wa_begin')){assert.equal(req.postDataJSON().p_phone,'919000000001');waStatus={status:'pending',last4:'0001',expires_at:new Date(Date.now()+600000).toISOString()};return send({code:waCode,expires_at:waStatus.expires_at});}
+  if(path.endsWith('/rpc/wa_unlink')){waStatus={status:'unlinked'};return send(null);}
   if(path.endsWith('/rpc/catalogue'))return send([product()]);
   if(path.endsWith('/fpos'))return send([{id:fpo,name:'Mock FPO',location:'Test'}]);
   if(path.endsWith('/profiles')){if(req.method()==='POST'){assert.equal(req.postDataJSON().id,id);storedRole=req.postDataJSON().account_role;return send(null,201);}return send(storedRole?{display_name:'Mock '+storedRole,account_role:storedRole}:null);}
@@ -89,6 +95,21 @@ try{
 
  const fresh=await openRole(null,'Farmer','10000000-0000-4000-8000-000000000004');
  await fresh.getByRole('heading',{name:'Complete your profile'}).waitFor();await fresh.getByLabel('Your name').fill('New farmer');assert.equal(await fresh.getByLabel('Account role').inputValue(),'farmer');await fresh.getByRole('checkbox').check();await fresh.getByRole('button',{name:'Save profile'}).click();await fresh.getByRole('heading',{name:'My farm'}).waitFor();assert.equal(await fresh.getByRole('button',{name:'Switch workspace'}).count(),0);
+ await page.getByRole('button',{name:'Profile',exact:true}).click();
+ await page.getByRole('heading',{name:'WhatsApp account'}).waitFor();
+ await page.getByText('Not linked',{exact:true}).waitFor();
+ await page.getByLabel('WhatsApp phone number (with country code)').fill('919000000001');
+ await page.getByRole('checkbox',{name:'I consent to linking this test number to my account.'}).check();
+ await page.getByRole('button',{name:'Generate linking code'}).click();
+ await page.getByText('LINK 12345678-1234-4123-8123-123456789abc',{exact:true}).waitFor();
+ page.simulateWhatsAppLink();
+ await page.getByRole('button',{name:'Refresh linking status'}).click();
+ await page.getByText('Linked · number ending 0001',{exact:true}).waitFor();
+ assert.equal(await page.getByText('LINK 12345678-1234-4123-8123-123456789abc',{exact:true}).count(),0);
+ await farmer.getByRole('button',{name:'Profile',exact:true}).click();await farmer.getByText('Not linked',{exact:true}).waitFor();
+ await manager.getByRole('button',{name:'Profile',exact:true}).click();await manager.getByText('Not linked',{exact:true}).waitFor();
+ page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Unlink WhatsApp'}).click();await page.getByText('Not linked',{exact:true}).waitFor();
+ console.log('PASS: WhatsApp profile consent, code display, refresh, separate account status and unlink UI (mocked backend)');
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile layout overflow');
  console.log('PASS: three distinct accounts cannot switch dashboards, wrong login choice redirects to assigned role, new role registration, commerce and delivery regression');
 }finally{await browser?.close();server.kill();}
