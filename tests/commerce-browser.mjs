@@ -19,6 +19,7 @@ try{
  const access_token=[Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url'),Buffer.from(JSON.stringify({sub:id,role:'authenticated',exp:Math.floor(Date.now()/1000)+3600})).toString('base64url'),'mock-signature'].join('.');
  const mockSession={...session,user:u,access_token};
  let storedRole=role;
+ let alertsRead=false;
  let waStatus={status:'unlinked'};
  const waCode='12345678-1234-4123-8123-123456789abc';
  page.simulateWhatsAppLink=()=>{assert.equal(waStatus.status,'pending');waStatus={status:'linked',last4:'0001'};};
@@ -28,6 +29,8 @@ try{
   const send=(body,status=200)=>route.fulfill({status,contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*','access-control-allow-methods':'GET,POST,OPTIONS'},body:JSON.stringify(body)});
   if(req.method()==='OPTIONS')return send({});
   if(path==='/auth/v1/user')return send(u);
+  if(path.endsWith('/rpc/manager_inbox')){assert.equal(storedRole,'manager');return send({unread:alertsRead?0:1,pending_members:1,pending_harvests:2,open_orders:1,alerts:alertsRead?[]:[{id:oid,kind:'harvest_submitted',fpo_id:fpo,fpo_name:'Mock FPO',created_at:new Date().toISOString()}]});}
+  if(path.endsWith('/rpc/manager_read')){assert.equal(storedRole,'manager');assert.equal(req.postDataJSON().p_id,oid);alertsRead=true;return send(true);}
   if(path.endsWith('/rpc/wa_status'))return send(waStatus);
   if(path.endsWith('/rpc/wa_begin')){assert.equal(req.postDataJSON().p_phone,'919000000001');waStatus={status:'pending',last4:'0001',expires_at:new Date(Date.now()+600000).toISOString()};return send({code:waCode,expires_at:waStatus.expires_at});}
   if(path.endsWith('/rpc/wa_unlink')){waStatus={status:'unlinked'};return send(null);}
@@ -93,6 +96,8 @@ try{
  await manager.getByRole('button',{name:'Delivery',exact:true}).click();await manager.getByText('You must manage an FPO to coordinate deliveries.').waitFor();
  managerEnabled=true;await manager.getByRole('button',{name:'Overview',exact:true}).click();await manager.getByRole('button',{name:'Refresh',exact:true}).click();await manager.getByText('Workspace refreshed.',{exact:true}).waitFor();await manager.getByRole('button',{name:'Members',exact:true}).click();await manager.getByRole('heading',{name:'Members and requests'}).waitFor();await manager.getByRole('button',{name:'Harvest review',exact:true}).click();await manager.getByRole('heading',{name:'Harvest verification'}).waitFor();await manager.getByRole('button',{name:'Inventory',exact:true}).click();await manager.getByRole('heading',{name:'Shared inventory'}).waitFor();await manager.getByRole('button',{name:'Delivery',exact:true}).click();await manager.getByRole('button',{name:'Mark packed'}).click();await manager.getByRole('button',{name:'Dispatch',exact:true}).click();await manager.getByRole('button',{name:'Mark delivered'}).click();await manager.getByRole('button',{name:'Mark delivered'}).waitFor({state:'hidden'});assert.equal(order.status,'delivered');
 
+ assert.equal(await page.getByRole('button',{name:'Notifications',exact:true}).count(),0);assert.equal(await farmer.getByRole('button',{name:'Notifications',exact:true}).count(),0);
+ await manager.getByRole('button',{name:'Notifications',exact:true}).click();await manager.getByRole('heading',{name:'FPO notifications'}).waitFor();await manager.getByText('New harvest submitted',{exact:true}).waitFor();await manager.getByRole('button',{name:'Mark read',exact:true}).click();await manager.getByText('No unread alerts.',{exact:true}).waitFor();await manager.getByRole('button',{name:'Refresh notifications'}).click();await manager.getByText('0 unread alerts',{exact:true}).waitFor();
  const fresh=await openRole(null,'Farmer','10000000-0000-4000-8000-000000000004');
  await fresh.getByRole('heading',{name:'Complete your profile'}).waitFor();await fresh.getByLabel('Your name').fill('New farmer');assert.equal(await fresh.getByLabel('Account role').inputValue(),'farmer');await fresh.getByRole('checkbox').check();await fresh.getByRole('button',{name:'Save profile'}).click();await fresh.getByRole('heading',{name:'My farm'}).waitFor();assert.equal(await fresh.getByRole('button',{name:'Switch workspace'}).count(),0);
  await page.getByRole('button',{name:'Profile',exact:true}).click();
