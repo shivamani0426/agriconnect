@@ -32,6 +32,7 @@ revoke all on function private.wa_guide_round01(text,text,boolean) from public,a
 create function private.wa_guide(p_phone text,p_text text,p_button boolean default false) returns jsonb language plpgsql security definer set search_path='' as $$
 declare u uuid; r text; g private.wa_guides%rowtype; c private.wa_advanced_cart%rowtype; cmd text; raw text:=trim(p_text); reply text; lang text; n integer; qty numeric; live_qty numeric; p jsonb; item jsonb; v_products jsonb; v_items jsonb; f uuid; token uuid; oid uuid; o public.orders%rowtype; total bigint; page integer; term text; rows_text text; received bigint; pending bigint; approved_kg numeric; available_kg numeric; reserved_kg numeric; num_h bigint; pending_h bigint; num_f bigint; num_o bigint; x text[];
 begin
+ if current_setting('app.wa_advanced',true) is distinct from 'on' then return private.wa_guide_round01(p_phone,p_text,p_button);end if;
  if p_phone is null or p_phone !~ '^[1-9][0-9]{6,14}$' or raw is null or length(raw) not between 1 and 512 then return private.wa_guide_round01(p_phone,p_text,p_button);end if;
  select w.user_id into u from private.wa_links w where w.phone=p_phone;
  if u is null then return private.wa_guide_round01(p_phone,p_text,p_button);end if;
@@ -165,4 +166,12 @@ end $$;
 create or replace function public.wa_guide(p_phone text,p_text text,p_button boolean) returns jsonb language sql security invoker set search_path='' as $$select private.wa_guide(p_phone,p_text,p_button)$$;
 revoke all on function private.wa_money(bigint),private.wa_clean(text,integer),private.wa_intent(text,text),private.wa_guide(text,text,boolean),public.wa_guide(text,text,boolean) from public,anon,authenticated,service_role;
 grant execute on function private.wa_guide(text,text,boolean),public.wa_guide(text,text,boolean) to service_role;
+-- Opt-in per transaction: migration alone does not switch the live guide.
+create function public.wa_advanced_prepare(p_id text,p_phone text,p_route text,p_command text) returns boolean language plpgsql security invoker set search_path='' as $
+begin
+ perform set_config('app.wa_advanced','on',true);
+ return private.wa_relay_prepare(p_id,p_phone,p_route,p_command);
+end $;
+revoke all on function public.wa_advanced_prepare(text,text,text,text) from public,anon,authenticated,service_role;
+grant execute on function public.wa_advanced_prepare(text,text,text,text) to service_role;
 commit;
