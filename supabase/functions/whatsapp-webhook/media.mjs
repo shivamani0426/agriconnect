@@ -58,7 +58,7 @@ export function createMedia({env,rpc,dbHeaders,dispatch,defer,fetcher=fetch,repo
  };
  async function start({id,phone,kind,media}){
   if(!can(phone))return;
-  const m=mime(media?.mime_type),target=kind==='image'?new RegExp('^photo ('+uuid+')$','i').exec((media?.caption??'').trim())?.[1]?.toLowerCase():null;
+  const m=mime(media?.mime_type),target=kind==='image'?new RegExp('^photo ('+uuid+')$','i').exec((typeof media?.caption==='string'?media.caption:'').trim())?.[1]?.toLowerCase():null;
   const endpoint=kind==='audio'?voiceUrl(env):null;
   if(!mediaId.test(media?.id??'')||!types[m]||(kind==='image'&&(!m.startsWith('image/')||!target||env('WA_PHOTO_ENABLED')!=='true'))||(kind==='audio'&&(m!=='audio/ogg'||!endpoint))){
    await help(phone,id,kind);return;
@@ -70,9 +70,9 @@ export function createMedia({env,rpc,dbHeaders,dispatch,defer,fetcher=fetch,repo
   await defer((async()=>{
    let ok=false,transcript=null;
    try{
-    if(!can(phone))throw Error('Disabled');
+    if(!can(phone)||!await rpc('wa_media_permitted',{p_id:id,p_phone:phone}))throw Error('Disabled or permission changed');
     const bytes=await downloadMedia({token:env('WA_ACCESS_TOKEN'),id:media.id,kind,expectedMime:m,fetcher});
-    if(!can(phone))throw Error('Disabled');
+    if(!can(phone)||!await rpc('wa_media_permitted',{p_id:id,p_phone:phone}))throw Error('Disabled or permission changed');
     if(kind==='image'){
      if(env('WA_PHOTO_ENABLED')!=='true'||!pathPattern.test(job.path)||!job.path.endsWith('.'+types[m]))throw Error('Invalid path');
      const r=await fetcher(storage()+'/'+job.path,{method:'POST',headers:{...dbHeaders(),'Content-Type':m,'x-upsert':'false'},body:bytes,redirect:'error',signal:AbortSignal.timeout(10000)});
