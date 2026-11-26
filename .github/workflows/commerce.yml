@@ -34,3 +34,4 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-link.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-harvest.sql
           psql -v ON_ERROR_STOP=1 -f tests/sql/fpo-alerts.sql
+          psql -v ON_ERROR_STOP=1 -f tests/sql/whatsapp-guide.sql

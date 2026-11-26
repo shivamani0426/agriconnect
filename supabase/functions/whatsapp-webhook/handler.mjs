@@ -10,7 +10,7 @@ export async function signature(secret,body){
  return 'sha256='+hex(await crypto.subtle.sign('HMAC',key,body));
 }
 const hash=async s=>hex(await crypto.subtle.digest('SHA-256',enc.encode(s)));
-export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,now=()=>Date.now(),report=()=>{}}){
+export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',orderCommand,harvestCommand,managerCommand,guide,now=()=>Date.now(),report=()=>{}}){
  return async req=>{
   try{
    if(req.method==='GET'){
@@ -38,8 +38,11 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
     for(const change of entry.changes){
      const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID||!Array.isArray(v.messages))continue;
      for(const m of v.messages){
-      if(m?.type!=='text'||typeof m.id!=='string'||!m.id.startsWith('wamid.')||m.id.length>512||!allowed.has(m.from)||typeof m.text?.body!=='string')continue;
-      const original=m.text.body.trim();
+      if(typeof m?.id!=='string'||!m.id.startsWith('wamid.')||m.id.length>512||!allowed.has(m.from) )continue;
+      const button=m.type==='interactive'&&m.interactive?.type==='button_reply'&&typeof m.interactive?.button_reply?.id==='string';
+      if(!button&&(m.type!=='text'||typeof m.text?.body!=='string'))continue;
+      if(button&&!guide)continue;
+      const original=(button?m.interactive.button_reply.id:m.text.body).trim();
       const command=original.toLowerCase();
       if(command.length>512)continue;
       const link=/^link ([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/.exec(command);
@@ -47,13 +50,15 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
       const shopping=/^(shop|buy|confirm|track|reset)( |$)/.test(command);
       const farming=/^(fpos|harvest|submit|harvests|harvestreset)( |$)/.test(command);
       const managing=/^(alerts|read)( |$)/.test(command);
-      if(!link&&!greeting&&!shopping&&!farming&&!managing)continue;
+      if(!link&&!greeting&&!shopping&&!farming&&!managing&&!guide)continue;
+      if(button&&!/^ac_(confirm|cancel):[0-9a-f-]{36}$/.test(command))continue;
       const age=now()-Number(m.timestamp)*1000;if(!Number.isFinite(age)||age>600000||age< -60000)continue;
       const id=await hash(PHONE_ID+':'+m.id);
       if(!await claim(id))continue;
       let ok=false;try{
        let reply='Welcome to AgriConnect! 🌱 To link your account, sign in at https://agriconnect-q7c2.onrender.com/ and open Profile → WhatsApp account. Send SHOP after linking a Customer account. All orders are tests.';
-       if(link){const outcome=await redeem(m.from,link[1]);reply=outcome==='linked'?'WhatsApp linked successfully! Open your AgriConnect profile and refresh linking status. Your account role has not changed.':'Link not completed. Check your number and use a fresh code from your own AgriConnect profile. If this number is already linked, unlink it from that account first.';}
+       if(link&&!button){const outcome=await redeem(m.from,link[1]);reply=outcome==='linked'?'WhatsApp linked successfully! Open your AgriConnect profile and refresh linking status. Your account role has not changed.':'Link not completed. Check your number and use a fresh code from your own AgriConnect profile. If this number is already linked, unlink it from that account first.';}
+       else if(guide&&(button||greeting||(!shopping&&!farming&&!managing)))reply=await guide(m.from,original,button);
        else if(managerCommand&&(greeting||managing))reply=await managerCommand(m.from,command);
        else if(harvestCommand&&(greeting||farming))reply=await harvestCommand(m.from,original);
        else if(orderCommand&&(greeting||shopping))reply=await orderCommand(m.from,command);
