@@ -56,6 +56,11 @@ try{
  }
  const page=await openRole('customer','FPO manager');
  await page.getByRole('heading',{name:'Available produce'}).waitFor();
+ for(const width of [320,360,390,430]){await page.setViewportSize({width,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Market overflow '+width);}
+ await page.setViewportSize({width:390,height:844});
+ await page.getByLabel('Find produce').fill('unavailable-test');await page.getByText('No matching produce. Try another search or grade.').waitFor();
+ await page.getByLabel('Find produce').fill('tomatoes');await page.getByRole('button',{name:'Grade B',exact:true}).click();await page.getByText('No matching produce. Try another search or grade.').waitFor();
+ await page.getByRole('button',{name:'All',exact:true}).click();await page.getByLabel('Find produce').fill('');
  assert.equal(await page.getByRole('button',{name:'Switch workspace'}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Overview',exact:true}).count(),0);
  assert.equal(await page.getByRole('button',{name:'Submit harvest',exact:true}).count(),0);
@@ -116,5 +121,6 @@ try{
  page.once('dialog',d=>d.accept());await page.getByRole('button',{name:'Unlink WhatsApp'}).click();await page.getByText('Not linked',{exact:true}).waitFor();
  console.log('PASS: WhatsApp profile consent, code display, refresh, separate account status and unlink UI (mocked backend)');
  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Mobile layout overflow');
+ for(const viewport of [page,farmer,manager]){for(const width of [320,360,390,430]){await viewport.setViewportSize({width,height:844});assert.ok(await viewport.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Role profile overflow '+width);}}
  console.log('PASS: three distinct accounts cannot switch dashboards, wrong login choice redirects to assigned role, new role registration, commerce and delivery regression');
 }finally{await browser?.close();server.kill();}

@@ -6,6 +6,10 @@ try {
  const url=process.env.AGRICONNECT_TEST_URL;
  if(!url)throw Error('Missing AGRICONNECT_TEST_URL');
  await page.goto(url,{waitUntil:'domcontentloaded'});
+ // Supports the deployed pre-redesign release during PR verification and the new entry flow after release.
+ await page.waitForFunction(()=>[...document.querySelectorAll('button,a')].some(el=>['Get started','Open farmer dashboard'].includes(el.textContent.trim())||el.textContent.trim().startsWith('Get started')));
+ const start=page.getByRole('button',{name:'Get started',exact:true});
+ if(await start.count())await start.click();
  const chooser=page.getByRole('button',{name:'Open farmer dashboard'});
  await chooser.waitFor();
  await chooser.click();
