@@ -6,7 +6,7 @@ import './style.css';
 import './mobile-theme.css';
 import './sunset-theme.css';
 import {SunsetScene} from './sunset-scene';
-import {Landing,RoleChooser,Portal,PillNav,Icon,ProduceArt,CountUp,FieldArt} from './ui';
+import {Landing,RoleChooser,Portal,PillNav,Icon,ProduceArt,CountUp} from './ui';
 import {ManagerNotifications} from './manager-notifications';
 import {WhatsAppLink} from './whatsapp-link';
 import {Checkout,OrderWorkspace,productKey,type CartLine,type Product} from './commerce';
