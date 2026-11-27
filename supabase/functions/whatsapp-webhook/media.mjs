@@ -1,5 +1,5 @@
 // Only authenticated allowlisted webhook events can call start(). No arbitrary media URLs.
-import {PHONE_ID} from './handler.mjs';
+import {PHONE_ID,resolveSender,validMetaId} from './config.mjs';
 import {allowedRecipients} from './transport.mjs';
 const types={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','audio/ogg':'ogg'};
 const uuid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -27,10 +27,10 @@ export function validateMetaUrl(value){
  if(u.protocol!=='https:'||u.hostname!=='lookaside.fbsbx.com'||u.port||u.username||u.password||!u.pathname.startsWith('/whatsapp_business/'))throw Error('Unsafe media URL');
  return u.href;
 }
-export async function downloadMedia({token,id,kind,expectedMime,fetcher=fetch}){
- if(!token||!mediaId.test(id)||!types[expectedMime]||(kind==='image')!==expectedMime.startsWith('image/'))throw Error('Invalid media');
+export async function downloadMedia({token,id,kind,expectedMime,phoneId=PHONE_ID,fetcher=fetch}){
+ if(!token||!validMetaId(phoneId)||!mediaId.test(id)||!types[expectedMime]||(kind==='image')!==expectedMime.startsWith('image/'))throw Error('Invalid media');
  const headers={Authorization:'Bearer '+token};
- const meta=await smallJson(await fetcher(graph+id+'?phone_number_id='+PHONE_ID,{headers,redirect:'error',signal:AbortSignal.timeout(6000)}));
+ const meta=await smallJson(await fetcher(graph+id+'?phone_number_id='+phoneId,{headers,redirect:'error',signal:AbortSignal.timeout(6000)}));
  if(String(meta.id)!==id||mime(meta.mime_type)!==expectedMime||!Number.isInteger(Number(meta.file_size))||Number(meta.file_size)<1||Number(meta.file_size)>bytesLimit(kind))throw Error('Invalid metadata');
  const url=validateMetaUrl(meta.url);
  const r=await fetcher(url,{headers,redirect:'error',signal:AbortSignal.timeout(10000)});
@@ -57,7 +57,7 @@ export function createMedia({env,rpc,dbHeaders,dispatch,defer,fetcher=fetch,repo
   await dispatch(phone,id);
  };
  async function start({id,phone,kind,media}){
-  if(!can(phone))return;
+  const sender=resolveSender(env);if(!sender||!can(phone))return;
   const m=mime(media?.mime_type),caption=typeof media?.caption==='string'?media.caption.trim():'';
   const target=kind==='image'?new RegExp('^photo ('+uuid+')$','i').exec(caption)?.[1]?.toLowerCase():null;
   const crop=kind==='image'&&!target?/^photo +([^\r\n]{1,100})$/i.exec(caption)?.[1]?.trim():null;
@@ -74,7 +74,7 @@ export function createMedia({env,rpc,dbHeaders,dispatch,defer,fetcher=fetch,repo
    let ok=false,transcript=null;
    try{
     if(!can(phone)||!await rpc('wa_media_permitted',{p_id:id,p_phone:phone}))throw Error('Disabled or permission changed');
-    const bytes=await downloadMedia({token:env('WA_ACCESS_TOKEN'),id:media.id,kind,expectedMime:m,fetcher});
+    const bytes=await downloadMedia({token:env('WA_ACCESS_TOKEN'),id:media.id,kind,expectedMime:m,phoneId:sender.phoneId,fetcher});
     if(!can(phone)||!await rpc('wa_media_permitted',{p_id:id,p_phone:phone}))throw Error('Disabled or permission changed');
     if(kind==='image'){
      if(env('WA_PHOTO_ENABLED')!=='true'||!pathPattern.test(job.path)||!job.path.endsWith('.'+types[m]))throw Error('Invalid path');
