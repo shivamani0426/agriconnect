@@ -12,19 +12,26 @@ try{
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route(host+'/**',route=>route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*'},body:'[]'}));
   await page.goto(origin);
-  await page.getByRole('heading',{name:'Choose your dashboard'}).waitFor();
+  const start=page.getByRole('button',{name:'Get started',exact:true});
+  await start.waitFor();
+  assert.equal(await page.locator('.role-list .role-row').count(),0);
+  assert.equal(await page.locator('.feature-chapter').count(),4);
+  assert.equal(await page.locator('.workspace-home button').count(),1,'Only Get started on landing');
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Landing overflow '+width);
   assert.equal(await page.locator('.landing-scene .farm-island').count(),1);
-  assert.equal(await page.locator('.role-list .role-row').count(),3);
   assert.equal(await page.locator('.workspace-home .panel').count(),0,'Landing should not contain boxed text panels');
   assert.equal(await page.locator('.farm-island').evaluate(el=>getComputedStyle(el).animationName),'none');
   assert.equal(await page.locator('.split-heading span').first().evaluate(el=>getComputedStyle(el).animationName),'none');
-  await page.getByRole('link',{name:'Get started'}).click();
+  await start.click();
+  await page.getByRole('heading',{name:'Choose your dashboard'}).waitFor();
+  assert.equal(await page.locator('.role-list .role-row').count(),3);
+  assert.equal(await page.locator('.portal-layer').count(),0,'Reduced motion bypasses portal');
   for(const role of ['Open farmer dashboard','Open FPO dashboard','Open customer dashboard']){
    const button=page.getByRole('button',{name:role,exact:true});const box=await button.boundingBox();assert.ok(box.height>=44,'Small touch target '+role);
    await button.click();await page.getByRole('heading',{name:'Welcome back'}).waitFor();
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Auth overflow '+width);
    await page.getByRole('button',{name:'Back to login choices'}).click();
+   await page.getByRole('heading',{name:'Choose your dashboard'}).waitFor();
   }
   assert.deepEqual(errors,[]);await page.close();
  }
