@@ -81,7 +81,11 @@ export function createRelay({env,rpc,fetcher=fetch,now=()=>Date.now(),report=()=
   async drain(){
    if(!enabled())return {enabled:false,attempted:0};
    let attempted=0;
-   for(const phone of allowedRecipients(env).slice(0,20)){if(await process(phone))attempted++;}
+   for(const phone of allowedRecipients(env).slice(0,20)){
+    // A failed database claim/finalize for one sender must not block other recipients.
+    // Leave the existing lease/retry logic responsible for ambiguous send outcomes.
+    try{if(await process(phone))attempted++;}catch{report('wa_relay_drain_recipient_failed');}
+   }
    return {enabled:true,attempted};
   },
   async health(){
