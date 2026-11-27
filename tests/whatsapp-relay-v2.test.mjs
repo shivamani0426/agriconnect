@@ -77,3 +77,33 @@ test('provider diagnostics contain only numeric codes and safe message kind',asy
  await sendOnce({token,to:phone,reply:{body:''},report:x=>logs.push(x),fetcher:async()=>assert.fail('invalid payload sent')});
  assert.deepEqual(logs,['wa_relay_payload_invalid']);
 });
+
+test('06E: failed claim for one recipient does not starve the next recovery job',async()=>{
+ const other='919999999998',calls=[],logs=[];
+ const relay=createRelay({env:k=>k==='WA_TEST_RECIPIENTS'?phone+','+other:env(k),report:x=>logs.push(x),
+ rpc:async(n,p)=>{calls.push([n,p]);if(n==='wa_relay_take'){if(p.p_phone===phone)throw Error('private database error');return {id:'b'.repeat(64),attempt:1,reply:{body:'Recovery reply'}};}return true;},
+ fetcher:async(url,opts)=>{assert.equal(JSON.parse(opts.body).to,other);return Response.json({messages:[{id:'wamid.recovered'}]});}});
+ assert.deepEqual(await relay.drain(),{enabled:true,attempted:1});
+ assert.equal(calls.filter(x=>x[0]==='wa_relay_finish').length,1);
+ assert.deepEqual(logs,['wa_relay_drain_recipient_failed','wa_relay_accepted']);
+});
+test('06E: failed finalize after provider acceptance does not send twice or block another recipient',async()=>{
+ const other='919999999998',sent=[],logs=[];
+ const relay=createRelay({env:k=>k==='WA_TEST_RECIPIENTS'?phone+','+other:env(k),report:x=>logs.push(x),
+ rpc:async(n,p)=>{if(n==='wa_relay_take')return {id:(p.p_phone===phone?'a':'b').repeat(64),attempt:1,reply:{body:'Stored reply'}};if(p.p_id==='a'.repeat(64))throw Error('temporary database error');return true;},
+ fetcher:async(url,opts)=>{const p=JSON.parse(opts.body).to;sent.push(p);return Response.json({messages:[{id:'wamid.'+p}]});}});
+ assert.deepEqual(await relay.drain(),{enabled:true,attempted:1});
+ assert.deepEqual(sent,[phone,other]);
+ assert.deepEqual(logs,['wa_relay_drain_recipient_failed','wa_relay_accepted']);
+});
+test('06C/E: revoked allowlist during claim blocks provider call and records safe rejection',async()=>{
+ let revoked=false;const finishes=[];
+ const relay=createRelay({env:k=>k==='WA_TEST_RECIPIENTS'&&revoked?'':env(k),rpc:async(n,p)=>{if(n==='wa_relay_take'){revoked=true;return {id:'a'.repeat(64),attempt:1,reply:{body:'private'}};}finishes.push(p);return true;},fetcher:async()=>assert.fail('revoked recipient sent')});
+ assert.equal(await relay.process(phone),true);assert.equal(finishes[0].p_state,'rejected');
+});
+test('06E: non-JSON and malformed provider outcomes are never falsely acknowledged',async()=>{
+ for(const status of [200,408,500,502,503]){
+  const res=await sendOnce({token,to:phone,reply:list,fetcher:async()=>new Response('unparseable',{status})});
+  assert.equal(res.state,'unknown');
+ }
+});
