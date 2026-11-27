@@ -36,4 +36,25 @@ try{
   assert.deepEqual(errors,[]);await page.close();
  }
  console.log('PASS: original landing, touch targets, role navigation, authentication and reduced motion at 320/360/390/430/768/1280px');
+ // Normal motion: assert both transition phases, the locked old surface, and destination.
+ const animated=await browser.newPage({viewport:{width:390,height:844},isMobile:true,hasTouch:true,reducedMotion:'no-preference'});
+ const errors=[];animated.on('pageerror',e=>errors.push(e.message));
+ await animated.route(host+'/**',route=>route.fulfill({status:200,contentType:'application/json',headers:{'access-control-allow-origin':'*','access-control-allow-headers':'*'},body:'[]'}));
+ await animated.goto(origin);
+ await animated.getByRole('button',{name:'Get started',exact:true}).waitFor();
+ const last=animated.locator('.chapter-3');
+ await last.scrollIntoViewIfNeeded();
+ await last.evaluate(el=>new Promise((resolve,reject)=>{let n=0;const check=()=>{if(el.classList.contains('revealed'))resolve();else if(++n>180)reject(Error('Scroll reveal did not activate'));else requestAnimationFrame(check)};check()}));
+ await animated.evaluate(()=>window.scrollTo(0,0));
+ for(const [selector,destination] of [['.landing-copy .primary-link','Choose your dashboard'],['.role-row[aria-label="Open farmer dashboard"]','Welcome back']]){
+  await animated.locator(selector).evaluate(el=>{el.click();el.click()});
+  await animated.locator('.portal-cover').waitFor({state:'attached'});
+  assert.equal(await animated.locator('.app-surface').getAttribute('inert'),'');
+  await animated.locator('.portal-reveal').waitFor({state:'attached'});
+  await animated.locator('.portal-layer').waitFor({state:'detached'});
+  await animated.getByRole('heading',{name:destination}).waitFor();
+  assert.equal(await animated.locator('.app-surface').getAttribute('inert'),null);
+ }
+ assert.deepEqual(errors,[]);await animated.close();
+ console.log('PASS: two black sphere transitions, repeat-tap protection, scroll reveal and login accessibility');
 }finally{await browser?.close();server.kill()}
