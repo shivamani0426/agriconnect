@@ -9,7 +9,9 @@
     "test": "node --test tests/*.test.mjs",
     "ondc:demo": "node ondc/demo.mjs",
     "ondc:test": "node --test tests/ondc-local.test.mjs tests/ondc-commerce.test.mjs",
-    "ondc:order-demo": "node ondc/order-demo.mjs"
+    "ondc:order-demo": "node ondc/order-demo.mjs",
+    "prebuild": "node scripts/generate-pwa-icons.mjs",
+    "predev": "node scripts/generate-pwa-icons.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.57.4",
