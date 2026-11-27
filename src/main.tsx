@@ -5,6 +5,8 @@ import {api,db,configured,client,result} from './api';
 import './style.css';
 import './mobile-theme.css';
 import './sunset-theme.css';
+import './install-app.css';
+import {InstallApp,registerAppWorker} from './install-app';
 import {SunsetScene} from './sunset-scene';
 import {Landing,RoleChooser,Portal,PillNav,Icon,ProduceArt,CountUp} from './ui';
 import {ManagerNotifications} from './manager-notifications';
@@ -94,6 +96,7 @@ return <><div className={'app-surface '+(!uid&&tab==='Choose'?'public-home':uid?
 {tab==='Earnings'&&(!session?login:loadingPrivate||loadedUser!==uid?<section className="panel"><p>Loading your account…</p><button disabled={busy} onClick={()=>void run(()=>load(uid),'Account refreshed.',false)}>Retry</button></section>:!profile?setup:<OrderWorkspace key={uid+'farmer'} uid={uid!} mode="farmer" managed={[]} fpos={fpos} onChange={()=>load(uid)}/>)}
 
 </>}
-</main><footer>AgriConnect · Test environment · Simulated payments and delivery · Restricted WhatsApp assistant · ONDC local sandbox · <a href="/privacy.html">Privacy policy</a></footer></div><Portal phase={portal}/></>}
+</main><footer>AgriConnect · Test environment · Simulated payments and delivery · Restricted WhatsApp assistant · ONDC local sandbox · <a href="/privacy.html">Privacy policy</a> <InstallApp/></footer></div><Portal phase={portal}/></>}
 function Photo({path}:{path:string}){const [url,setUrl]=useState(''),[error,setError]=useState('');return <div>{url?<img className="crop-photo" src={url} alt="Submitted crop" onError={()=>{setUrl('');setError('Photo link expired or unavailable.')}}/>:<button className="quiet" onClick={()=>{setError('');api.photo(path).then(data=>setUrl(data?.signedUrl??'')).catch(e=>setError(e.message))}}>View crop photo</button>}{error&&<p role="alert">{error}</p>}</div>}
+registerAppWorker();
 createRoot(document.getElementById('root')!).render(<App/>);
