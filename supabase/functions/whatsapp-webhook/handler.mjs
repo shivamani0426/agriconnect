@@ -1,6 +1,6 @@
 // Test-only WhatsApp transport. Test checkout and text harvest submission; no real payment, delivery or media. Linking is restricted to signed, allowlisted senders.
-export const PHONE_ID='1456298224232496';
-export const WABA_ID='2111995459517329';
+import {resolveSender} from './config.mjs';
+export {PHONE_ID,WABA_ID} from './config.mjs';
 const enc=new TextEncoder();
 const response=(body,status=200)=>new Response(body,{status,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
 const hex=bytes=>Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
@@ -32,11 +32,12 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
    if(event?.object!=='whatsapp_business_account'||!Array.isArray(event.entry))return response('OK');
    if(env('WA_TEST_REPLIES_ENABLED')!=='true')return response('OK');
    const allowed=new Set((env('WA_TEST_RECIPIENTS')??'').split(',').map(n=>n.trim()).filter(n=>/^\d{7,15}$/.test(n)));
-   if(!allowed.size||(!prepare&&!env('WA_ACCESS_TOKEN')))return response('Not configured',503);
+   const senderConfig=resolveSender(env);
+   if(!senderConfig||!allowed.size||(!prepare&&!env('WA_ACCESS_TOKEN')))return response('Not configured',503);
    for(const entry of event.entry){
-    if(entry?.id!==WABA_ID||!Array.isArray(entry.changes))continue;
+    if(entry?.id!==senderConfig.wabaId||!Array.isArray(entry.changes))continue;
     for(const change of entry.changes){
-     const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==PHONE_ID )continue;
+     const v=change?.value;if(change?.field!=='messages'||v?.metadata?.phone_number_id!==senderConfig.phoneId )continue;
      if(statusCallback&&Array.isArray(v.statuses))for(const s of v.statuses){
       if(typeof s?.id==='string'&&s.id.startsWith('wamid.')&&s.id.length<=512&&allowed.has(s.recipient_id)&&['sent','delivered','read','failed'].includes(s.status)){
        await statusCallback(s.recipient_id,s.id,s.status);
@@ -47,7 +48,7 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
       if(media&&['audio','image'].includes(m.type)){
        const age=now()-Number(m.timestamp)*1000;
        if(!Number.isFinite(age)||age>600000||age< -60000)continue;
-       const id=await hash(PHONE_ID+':'+m.id);
+       const id=await hash(senderConfig.phoneId+':'+m.id);
        await media({id,phone:m.from,kind:m.type,media:m[m.type]});
        continue;
       }
@@ -67,7 +68,7 @@ export function createHandler({env,claim,finish,send,redeem=async()=> 'invalid',
       if(button&&!/^ac_(confirm|cancel):[0-9a-f-]{36}$/.test(command))continue;
       if(list&&!/^ac_menu:[0-9a-f-]{36}:[1-7]$/.test(command))continue;
       const age=now()-Number(m.timestamp)*1000;if(!Number.isFinite(age)||age>600000||age< -60000)continue;
-      const id=await hash(PHONE_ID+':'+m.id);
+      const id=await hash(senderConfig.phoneId+':'+m.id);
       if(prepare){
        const route=list?'list':button?'button':link?'link':greeting?'guide':shopping?'order':farming?'harvest':managing?'manager':'guide';
        await prepare({id,phone:m.from,route,command:link&&!button&&!list?link[1]:shopping||managing?command:original});

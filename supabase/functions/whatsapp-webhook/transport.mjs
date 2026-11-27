@@ -1,6 +1,5 @@
 // Testable relay transport. Never forward provider response bodies or credentials to clients/logs.
-import {PHONE_ID} from './handler.mjs';
-const graph='https://graph.facebook.com/v25.0/'+PHONE_ID;
+import {PHONE_ID,resolveSender,validMetaId,graphBase} from './config.mjs';
 const chars=s=>typeof s==='string'?Array.from(s).length:Infinity;
 const uuid='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const confirmId=new RegExp('^ac_(confirm|cancel):'+uuid+'$');
@@ -31,12 +30,12 @@ function rejection(status,code){
  if(status===408||status>=500)return 'unknown';
  return 'rejected';
 }
-export async function sendOnce({token,to,reply,fetcher=fetch,report=()=>{}}){
+export async function sendOnce({token,to,reply,phoneId=PHONE_ID,fetcher=fetch,report=()=>{}}){
  let message;
  try{message=buildMessage(reply);}catch{report('wa_relay_payload_invalid');return {state:'rejected'};}
- if(!token)return {state:'credentials'};
+ if(!token||!validMetaId(phoneId))return {state:'credentials'};
  try{
-  const r=await fetcher(graph+'/messages',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to,...message}),signal:AbortSignal.timeout(8000),redirect:'error'});
+  const r=await fetcher(graphBase+phoneId+'/messages',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to,...message}),signal:AbortSignal.timeout(8000),redirect:'error'});
   let data;try{data=await r.json();}catch{/* A successful HTTP response without a valid message ID is ambiguous. */}
   if(!r.ok){
    const code=Number.isSafeInteger(data?.error?.code)?data.error.code:'unknown';
@@ -49,11 +48,12 @@ export async function sendOnce({token,to,reply,fetcher=fetch,report=()=>{}}){
   return validId(provider)?{state:'accepted',provider}:{state:'unknown'};
  }catch{return {state:'unknown'};}
 }
-export async function checkToken({token,fetcher=fetch}){
+export async function checkToken({token,phoneId=PHONE_ID,fetcher=fetch}){
+ if(!validMetaId(phoneId))return 'invalid_configuration';
  if(!token)return 'missing';
  try{
-  const r=await fetcher(graph+'?fields=id',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(5000),redirect:'error'});
-  if(r.ok){const data=await r.json();return data?.id===PHONE_ID?'phone_readable':'unexpected_response';}
+  const r=await fetcher(graphBase+phoneId+'?fields=id',{headers:{Authorization:'Bearer '+token},signal:AbortSignal.timeout(5000),redirect:'error'});
+  if(r.ok){const data=await r.json();return data?.id===phoneId?'phone_readable':'unexpected_response';}
   let code;try{code=(await r.json())?.error?.code;}catch{}
   return rejection(r.status,code);
  }catch{return 'unreachable';}
@@ -62,12 +62,14 @@ export function createRelay({env,rpc,fetcher=fetch,now=()=>Date.now(),report=()=
  const enabled=()=>env('WA_TEST_REPLIES_ENABLED')==='true'&&env('WA_RELAY_V2_ENABLED')==='true';
  const canSend=phone=>enabled()&&allowedRecipients(env).includes(phone);
  async function process(phone,id=null){
-  if(!canSend(phone)||!env('WA_ACCESS_TOKEN'))return false;
+  const sender=resolveSender(env);
+  if(!sender||!canSend(phone)||!env('WA_ACCESS_TOKEN'))return false;
   const q=await rpc('wa_relay_take',{p_phone:phone,p_id:id});
   if(!q)return false;
   const start=now();
   // Recheck flags and allowlist on every attempt; never use a recipient from a stored arbitrary payload.
-  const result=canSend(phone)?await sendOnce({token:env('WA_ACCESS_TOKEN'),to:phone,reply:q.reply,fetcher,report}):{state:'rejected'};
+  const current=resolveSender(env);
+  const result=canSend(phone)&&current?.phoneId===sender.phoneId&&current?.wabaId===sender.wabaId?await sendOnce({token:env('WA_ACCESS_TOKEN'),phoneId:sender.phoneId,to:phone,reply:q.reply,fetcher,report}):{state:'rejected'};
   const elapsed=Math.min(120000,Math.max(0,Math.round(now()-start)));
   await rpc('wa_relay_finish',{p_id:q.id,p_attempt:q.attempt,p_state:result.state,p_provider:result.provider??null,p_latency:elapsed});
   report('wa_relay_'+result.state);
@@ -90,7 +92,12 @@ export function createRelay({env,rpc,fetcher=fetch,now=()=>Date.now(),report=()=
   },
   async health(){
    const queue=await rpc('wa_relay_health',{});
-   return {enabled:enabled(),allowlisted_recipients:allowedRecipients(env).length,token:await checkToken({token:env('WA_ACCESS_TOKEN'),fetcher}),queue};
+   const sender=resolveSender(env);
+   const token=sender?await checkToken({token:env('WA_ACCESS_TOKEN'),phoneId:sender.phoneId,fetcher}):'invalid_configuration';
+   if(token!=='phone_readable')report('wa_health_token_'+token);
+   if(!enabled())report('wa_health_disabled');
+   if(!allowedRecipients(env).length)report('wa_health_allowlist_empty');
+   return {enabled:enabled(),allowlisted_recipients:allowedRecipients(env).length,sender_configuration:sender?.source??'invalid',token,queue};
   }
  };
 }
