@@ -11,7 +11,7 @@ select public.review_harvest('c9600000-0000-4000-8000-000000000001','A',3000,tru
 select public.review_harvest('c9600000-0000-4000-8000-000000000002','A',2000,true,'');
 reset role;
 do $qa$ begin
- if has_table_privilege('authenticated','private.wa_advanced_cart','select') or has_table_privilege('anon','private.wa_media_jobs','select') or has_function_privilege('authenticated','public.wa_advanced_prepare(text,text,text,text)','execute') or has_function_privilege('authenticated','public.wa_media_claim(text,text,text,uuid,text)','execute') or has_function_privilege('anon','public.wa_media_cleanup()','execute') then raise exception 'FAIL permissions';end if;
+ if has_function_privilege('authenticated','public.wa_photo_claim(text,text,text,text)','execute') or has_function_privilege('anon','public.wa_photo_claim(text,text,text,text)','execute') or has_table_privilege('authenticated','private.wa_advanced_cart','select') or has_table_privilege('anon','private.wa_media_jobs','select') or has_function_privilege('authenticated','public.wa_advanced_prepare(text,text,text,text)','execute') or has_function_privilege('authenticated','public.wa_media_claim(text,text,text,uuid,text)','execute') or has_function_privilege('anon','public.wa_media_cleanup()','execute') then raise exception 'FAIL permissions';end if;
 end $qa$;
 set local role service_role;
 do $qa$ declare q jsonb; id text; body text; begin
@@ -47,7 +47,10 @@ do $qa$ declare q jsonb; id text; body text; begin
  q:=public.wa_relay_take('919000009602',repeat('b',64));
  if q->'reply'->>'body' not like '%not executed%' then raise exception 'FAIL voice readback';end if;
  perform public.wa_relay_finish(repeat('b',64),1,'accepted','wamid.voice',10);
- q:=public.wa_media_claim(repeat('c',64),'919000009602','image','c9600000-0000-4000-8000-000000000003','jpg');
+ if public.wa_photo_claim(repeat('c',64),'919000009603',null,'jpg')->>'state'<>'denied' then raise exception 'FAIL direct photo role';end if;
+ if public.wa_photo_claim(repeat('c',64),'919000009602','unknown crop','jpg')->>'state'<>'denied' then raise exception 'FAIL unknown crop';end if;
+ if public.wa_guide('919000009602','/PHOTOHELP',false)->>'body' not like '%no caption is needed%' then raise exception 'FAIL photo guidance';end if;
+ q:=public.wa_photo_claim(repeat('c',64),'919000009602',null,'jpg');
  if q->>'state'<>'claimed' then raise exception 'FAIL photo claim';end if;
  perform set_config('qa.photo',q->>'path',true);
 end $qa$;
@@ -66,6 +69,18 @@ reset role;
 do $qa$ begin
  if (select count(*) from public.orders)<>1 or (select jsonb_array_length(items) from public.orders)<>2 or (select sum(available_kg) from public.inventory_lots)<>30 then raise exception 'FAIL stock or order invariant';end if;
  if (select photo_path from public.harvests where id='c9600000-0000-4000-8000-000000000003') is distinct from current_setting('qa.photo') then raise exception 'FAIL stored photo';end if;
+end $qa$;
+-- Multiple pending records (including an already attached record) must not be guessed.
+insert into public.harvests(id,fpo_id,farmer_id,crop,quantity_kg,harvest_date) values('c9600000-0000-4000-8000-000000000004','b9600000-0000-4000-8000-000000000001','a9600000-0000-4000-8000-000000000002','QA Mangoes',5,'2026-01-01');
+set local role service_role;
+do $qa$ begin
+ if public.wa_photo_claim(repeat('e',64),'919000009602',null,'jpg')->>'state'<>'denied' then raise exception 'FAIL ambiguous photo';end if;
+ if public.wa_photo_claim(repeat('e',64),'919000009602','QA Photo crop','jpg')->>'state'<>'denied' then raise exception 'FAIL overwrite';end if;
+ if public.wa_photo_claim(repeat('e',64),'919000009602','qa mangoes','jpg')->>'state'<>'claimed' then raise exception 'FAIL named photo';end if;
+end $qa$;
+reset role;
+do $qa$ begin
+ if (select target from private.wa_media_jobs where message_hash=repeat('e',64)) is distinct from 'c9600000-0000-4000-8000-000000000004'::uuid then raise exception 'FAIL named target';end if;
 end $qa$;
 select 'PASS: advanced intent, language, scoped summaries/reports, cart, history, permission, media and order invariants' result;
 rollback;

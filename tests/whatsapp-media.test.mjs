@@ -65,3 +65,16 @@ test('200 concurrent signed webhook requests preserve unique message identities 
  const results=await Promise.all(requests.map(r=>handler(r)));
  assert.ok(results.every(r=>r.status===200));assert.equal(ids.size,100);assert.equal(duplicates,100);assert.equal(dispatches.size,100);
 });
+
+test('caption-free and crop-name photo claims use safe resolver; unknown captions do not fetch media',async()=>{
+ const calls=[];
+ const media=createMedia({env:k=>baseEnv[k],rpc:async(n,p)=>{calls.push([n,p]);return {state:'denied'};},dbHeaders:()=>({}),dispatch:async()=>{},defer:async t=>t,fetcher:async()=>assert.fail('no external access on denial')});
+ await media.start({id,phone,kind:'image',media:{...photo,caption:undefined}});
+ assert.equal(calls[0][0],'wa_photo_claim');assert.equal(calls[0][1].p_crop,null);
+ calls.length=0;
+ await media.start({id,phone,kind:'image',media:{...photo,caption:'PHOTO Tomatoes'}});
+ assert.equal(calls[0][0],'wa_photo_claim');assert.equal(calls[0][1].p_crop,'Tomatoes');
+ calls.length=0;
+ await media.start({id,phone,kind:'image',media:{...photo,caption:'unrelated caption'}});
+ assert.deepEqual(calls.map(x=>x[0]),['wa_advanced_prepare']);
+});

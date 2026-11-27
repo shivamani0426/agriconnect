@@ -58,12 +58,15 @@ export function createMedia({env,rpc,dbHeaders,dispatch,defer,fetcher=fetch,repo
  };
  async function start({id,phone,kind,media}){
   if(!can(phone))return;
-  const m=mime(media?.mime_type),target=kind==='image'?new RegExp('^photo ('+uuid+')$','i').exec((typeof media?.caption==='string'?media.caption:'').trim())?.[1]?.toLowerCase():null;
+  const m=mime(media?.mime_type),caption=typeof media?.caption==='string'?media.caption.trim():'';
+  const target=kind==='image'?new RegExp('^photo ('+uuid+')$','i').exec(caption)?.[1]?.toLowerCase():null;
+  const crop=kind==='image'&&!target?/^photo +([^\r\n]{1,100})$/i.exec(caption)?.[1]?.trim():null;
+  const auto=kind==='image'&&!target&&(!caption||/^photo$/i.test(caption)||!!crop);
   const endpoint=kind==='audio'?voiceUrl(env):null;
-  if(!mediaId.test(media?.id??'')||!types[m]||(kind==='image'&&(!m.startsWith('image/')||!target||env('WA_PHOTO_ENABLED')!=='true'))||(kind==='audio'&&(m!=='audio/ogg'||!endpoint))){
+  if(!mediaId.test(media?.id??'')||!types[m]||(kind==='image'&&(!m.startsWith('image/')||(!target&&!auto)||env('WA_PHOTO_ENABLED')!=='true'))||(kind==='audio'&&(m!=='audio/ogg'||!endpoint))){
    await help(phone,id,kind);return;
   }
-  const job=await rpc('wa_media_claim',{p_id:id,p_phone:phone,p_kind:kind,p_target:target??null,p_ext:types[m]});
+  const job=auto?await rpc('wa_photo_claim',{p_id:id,p_phone:phone,p_crop:crop||null,p_ext:types[m]}):await rpc('wa_media_claim',{p_id:id,p_phone:phone,p_kind:kind,p_target:target??null,p_ext:types[m]});
   if(job?.state==='duplicate'){await dispatch(phone,id);return;}
   if(job?.state==='busy')return;
   if(job?.state!=='claimed'){await help(phone,id,kind);return;}
