@@ -59,59 +59,14 @@ export function createMedia({env,rpc,dbHeaders,dispatch,defer,fetcher=fetch,repo
  async function start({id,phone,kind,media}){
   if(!can(phone))return;
   const m=mime(media?.mime_type),caption=typeof media?.caption==='string'?media.caption.trim():'';
-  const target=kind==='image'?new RegExp('^photo ('+uuid+')
+  const target=kind==='image'?new RegExp('^photo ('+uuid+')$','i').exec(caption)?.[1]?.toLowerCase():null;
+  const crop=kind==='image'&&!target?/^photo +([^\r\n]{1,100})$/i.exec(caption)?.[1]?.trim():null;
+  const auto=kind==='image'&&!target&&(!caption||/^photo$/i.test(caption)||!!crop);
   const endpoint=kind==='audio'?voiceUrl(env):null;
   if(!mediaId.test(media?.id??'')||!types[m]||(kind==='image'&&(!m.startsWith('image/')||(!target&&!auto)||env('WA_PHOTO_ENABLED')!=='true'))||(kind==='audio'&&(m!=='audio/ogg'||!endpoint))){
    await help(phone,id,kind);return;
   }
   const job=auto?await rpc('wa_photo_claim',{p_id:id,p_phone:phone,p_crop:crop||null,p_ext:types[m]}):await rpc('wa_media_claim',{p_id:id,p_phone:phone,p_kind:kind,p_target:target??null,p_ext:types[m]});
-  if(job?.state==='duplicate'){await dispatch(phone,id);return;}
-  if(job?.state==='busy')return;
-  if(job?.state!=='claimed'){await help(phone,id,kind);return;}
-  await defer((async()=>{
-   let ok=false,transcript=null;
-   try{
-    if(!can(phone)||!await rpc('wa_media_permitted',{p_id:id,p_phone:phone}))throw Error('Disabled or permission changed');
-    const bytes=await downloadMedia({token:env('WA_ACCESS_TOKEN'),id:media.id,kind,expectedMime:m,fetcher});
-    if(!can(phone)||!await rpc('wa_media_permitted',{p_id:id,p_phone:phone}))throw Error('Disabled or permission changed');
-    if(kind==='image'){
-     if(env('WA_PHOTO_ENABLED')!=='true'||!pathPattern.test(job.path)||!job.path.endsWith('.'+types[m]))throw Error('Invalid path');
-     const r=await fetcher(storage()+'/'+job.path,{method:'POST',headers:{...dbHeaders(),'Content-Type':m,'x-upsert':'false'},body:bytes,redirect:'error',signal:AbortSignal.timeout(10000)});
-     ok=r.ok;
-    }else{
-     // Operator-configured speech-to-text endpoint only, after explicit account consent.
-     if(voiceUrl(env)!==endpoint)throw Error('Voice disabled');
-     const r=await fetcher(endpoint,{method:'POST',headers:{Authorization:'Bearer '+env('WA_VOICE_SERVICE_TOKEN'),'Content-Type':'audio/ogg'},body:bytes,redirect:'error',signal:AbortSignal.timeout(25000)});
-     const result=await smallJson(r);
-     if(typeof result.text==='string'&&result.text.trim().length>0&&result.text.trim().length<=512){transcript=result.text.trim();ok=true;}
-    }
-   }catch{report('wa_media_processing_failed');}
-   if(can(phone)&&await rpc('wa_media_finish',{p_id:id,p_phone:phone,p_ok:ok,p_transcript:transcript}))await dispatch(phone,id);
-  })().catch(()=>report('wa_media_worker_failed')));
- }
- async function cleanup(){
-  const jobs=await rpc('wa_media_cleanup',{});
-  if(!Array.isArray(jobs))return 0;
-  let cleaned=0;
-  for(const j of jobs){
-   if(!pathPattern.test(j.path)||!/^[a-f0-9]{64}$/.test(j.message_hash))continue;
-   try{
-    const r=await fetcher(storage(),{method:'DELETE',headers:dbHeaders(),body:JSON.stringify({prefixes:[j.path]}),redirect:'error',signal:AbortSignal.timeout(8000)});
-    if(r.ok){await rpc('wa_media_cleaned',{p_id:j.message_hash});cleaned++;}
-   }catch{report('wa_media_cleanup_failed');}
-  }
-  return cleaned;
- }
- return {start,cleanup,voiceConfigured:()=>!!voiceUrl(env)};
-}
-,'i').exec(caption)?.[1]?.toLowerCase():null;
-  const crop=kind==='image'&&!target?/^photo +([^\r\n]{1,100})$/i.exec(caption)?.[1]?.trim():null;
-  const auto=kind==='image'&&!target&&(!caption||/^photo$/i.test(caption)||!!crop);
-  const endpoint=kind==='audio'?voiceUrl(env):null;
-  if(!mediaId.test(media?.id??'')||!types[m]||(kind==='image'&&(!m.startsWith('image/')||!target||env('WA_PHOTO_ENABLED')!=='true'))||(kind==='audio'&&(m!=='audio/ogg'||!endpoint))){
-   await help(phone,id,kind);return;
-  }
-  const job=await rpc('wa_media_claim',{p_id:id,p_phone:phone,p_kind:kind,p_target:target??null,p_ext:types[m]});
   if(job?.state==='duplicate'){await dispatch(phone,id);return;}
   if(job?.state==='busy')return;
   if(job?.state!=='claimed'){await help(phone,id,kind);return;}
