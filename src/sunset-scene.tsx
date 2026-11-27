@@ -4,13 +4,14 @@ export function SunsetScene({live=false,className=''}:{live?:boolean;className?:
  const uid=useId().replace(/:/g,'');const ref=useRef<HTMLDivElement>(null);const [moving,setMoving]=useState(false);
  useEffect(()=>{if(!live||!ref.current)return;const motion=matchMedia('(prefers-reduced-motion: reduce)');let visible=false;
   const update=()=>setMoving(visible&&!document.hidden&&!motion.matches);
+  if(!('IntersectionObserver' in window))return;
   const observer=new IntersectionObserver(entries=>{visible=entries[0]?.isIntersecting??false;update()});
   observer.observe(ref.current);motion.addEventListener('change',update);document.addEventListener('visibilitychange',update);
   return()=>{observer.disconnect();motion.removeEventListener('change',update);document.removeEventListener('visibilitychange',update)}
  },[live]);
  const id=(s:string)=>uid+s;const paint=(s:string)=>'url(#'+id(s)+')';
  return <div ref={ref} className={'sunset-scene '+className+(moving?' scene-moving':'')} aria-hidden="true">
- <svg viewBox="0 0 1200 760" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg" focusable="false">
+ <svg viewBox="0 0 1200 760" preserveAspectRatio={live?'xMidYMax slice':'xMidYMid slice'} xmlns="http://www.w3.org/2000/svg" focusable="false">
  <defs>
  <linearGradient id={id('sky')} x2="0" y2="1"><stop stopColor="#f6adba"/><stop offset=".36" stopColor="#ffc5a0"/><stop offset=".63" stopColor="#ffbf60"/><stop offset=".82" stopColor="#ffd78a"/><stop offset="1" stopColor="#fbd79e"/></linearGradient>
  <radialGradient id={id('halo')}><stop stopColor="#fff5b1" stopOpacity=".95"/><stop offset=".46" stopColor="#ffe0a1" stopOpacity=".62"/><stop offset="1" stopColor="#ffbe65" stopOpacity="0"/></radialGradient>
