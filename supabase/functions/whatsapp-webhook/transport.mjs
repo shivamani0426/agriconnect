@@ -31,14 +31,20 @@ function rejection(status,code){
  if(status===408||status>=500)return 'unknown';
  return 'rejected';
 }
-export async function sendOnce({token,to,reply,fetcher=fetch}){
+export async function sendOnce({token,to,reply,fetcher=fetch,report=()=>{}}){
  let message;
- try{message=buildMessage(reply);}catch{return {state:'rejected'};}
+ try{message=buildMessage(reply);}catch{report('wa_relay_payload_invalid');return {state:'rejected'};}
  if(!token)return {state:'credentials'};
  try{
   const r=await fetcher(graph+'/messages',{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:JSON.stringify({messaging_product:'whatsapp',recipient_type:'individual',to,...message}),signal:AbortSignal.timeout(8000),redirect:'error'});
   let data;try{data=await r.json();}catch{/* A successful HTTP response without a valid message ID is ambiguous. */}
-  if(!r.ok)return {state:rejection(r.status,data?.error?.code)};
+  if(!r.ok){
+   const code=Number.isSafeInteger(data?.error?.code)?data.error.code:'unknown';
+   const subcode=Number.isSafeInteger(data?.error?.error_subcode)?data.error.error_subcode:'unknown';
+   const kind=message.type==='interactive'?message.interactive.type:'text';
+   report('wa_relay_provider_error status='+r.status+' code='+code+' subcode='+subcode+' kind='+kind);
+   return {state:rejection(r.status,data?.error?.code)};
+  }
   const provider=data?.messages?.[0]?.id;
   return validId(provider)?{state:'accepted',provider}:{state:'unknown'};
  }catch{return {state:'unknown'};}
@@ -61,7 +67,7 @@ export function createRelay({env,rpc,fetcher=fetch,now=()=>Date.now(),report=()=
   if(!q)return false;
   const start=now();
   // Recheck flags and allowlist on every attempt; never use a recipient from a stored arbitrary payload.
-  const result=canSend(phone)?await sendOnce({token:env('WA_ACCESS_TOKEN'),to:phone,reply:q.reply,fetcher}):{state:'rejected'};
+  const result=canSend(phone)?await sendOnce({token:env('WA_ACCESS_TOKEN'),to:phone,reply:q.reply,fetcher,report}):{state:'rejected'};
   const elapsed=Math.min(120000,Math.max(0,Math.round(now()-start)));
   await rpc('wa_relay_finish',{p_id:q.id,p_attempt:q.attempt,p_state:result.state,p_provider:result.provider??null,p_latency:elapsed});
   report('wa_relay_'+result.state);
