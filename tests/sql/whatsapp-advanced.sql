@@ -49,7 +49,7 @@ do $qa$ declare q jsonb; id text; body text; begin
  perform public.wa_relay_finish(repeat('b',64),1,'accepted','wamid.voice',10);
  if public.wa_photo_claim(repeat('c',64),'919000009603',null,'jpg')->>'state'<>'denied' then raise exception 'FAIL direct photo role';end if;
  if public.wa_photo_claim(repeat('c',64),'919000009602','unknown crop','jpg')->>'state'<>'denied' then raise exception 'FAIL unknown crop';end if;
- if public.wa_guide('919000009602','/PHOTOHELP',false)->>'body' not like '%no caption is needed%' then raise exception 'FAIL photo guidance';end if;
+ if public.wa_guide('919000009602','/PHOTOHELP',false)->>'body' not like '%ಶೀರ್ಷಿಕೆ ಬೇಡ%' then raise exception 'FAIL localized photo guidance';end if;
  q:=public.wa_photo_claim(repeat('c',64),'919000009602',null,'jpg');
  if q->>'state'<>'claimed' then raise exception 'FAIL photo claim';end if;
  perform set_config('qa.photo',q->>'path',true);
