@@ -14,6 +14,10 @@ try{
   await page.goto(origin);
   await page.getByRole('heading',{name:'Choose your dashboard'}).waitFor();
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Landing overflow '+width);
+  assert.equal(await page.locator('.landing-scene .farm-island').count(),1);
+  assert.equal(await page.locator('.role-list .role-row').count(),3);
+  assert.equal(await page.locator('.workspace-home .panel').count(),0,'Landing should not contain boxed text panels');
+  assert.equal(await page.locator('.farm-island').evaluate(el=>getComputedStyle(el).animationName),'none');
   assert.equal(await page.locator('.split-heading span').first().evaluate(el=>getComputedStyle(el).animationName),'none');
   await page.getByRole('link',{name:'Get started'}).click();
   for(const role of ['Open farmer dashboard','Open FPO dashboard','Open customer dashboard']){
