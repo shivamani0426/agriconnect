@@ -67,3 +67,13 @@ test('worker refuses disabled or non-allowlisted recipients; token checks are re
  assert.equal(await checkToken({token,fetcher:async(url,opts)=>{assert.match(url,/\?fields=id$/);assert.equal(opts.method,undefined);return Response.json({id:PHONE_ID});}}),'phone_readable');
  assert.equal(await checkToken({token:null}),'missing');
 });
+
+test('provider diagnostics contain only numeric codes and safe message kind',async()=>{
+ const logs=[];
+ const result=await sendOnce({token,to:phone,reply:list,report:x=>logs.push(x),fetcher:async()=>Response.json({error:{code:131030,error_subcode:123,message:'private token and recipient',error_data:{details:'private contents'}}},{status:400})});
+ assert.equal(result.state,'rejected');
+ assert.deepEqual(logs,['wa_relay_provider_error status=400 code=131030 subcode=123 kind=list']);
+ logs.length=0;
+ await sendOnce({token,to:phone,reply:{body:''},report:x=>logs.push(x),fetcher:async()=>assert.fail('invalid payload sent')});
+ assert.deepEqual(logs,['wa_relay_payload_invalid']);
+});
