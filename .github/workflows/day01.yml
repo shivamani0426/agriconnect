@@ -21,3 +21,4 @@ jobs:
       - run: node tests/google-oauth-browser.mjs
 
       - run: node tests/commerce-browser.mjs
+      - run: node tests/mobile-ui-browser.mjs
